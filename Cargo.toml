@@ -3,27 +3,22 @@ resolver = "2"
 members = [
     # CORE
     "core/*",
-
     # FFI
     "ffi/*",
-
     # TESTS
     "tests/*",
-
     # TOOLS
     "tools/*",
-
     # OTHERS
     "examples",
     "cli",
-
     # TOOLS
     "tools/*",
 ]
 
 exclude = [
     "tests/fuzz", # Does weird things on Windows tests
-    "tests/src",  # Just a hack to have fuzz inside tests
+    "tests/src", # Just a hack to have fuzz inside tests
 ]
 
 [workspace.package]
@@ -43,6 +38,7 @@ boa_engine = { version = "~0.18.0", path = "core/engine" }
 boa_gc = { version = "~0.18.0", path = "core/gc" }
 boa_icu_provider = { version = "~0.18.0", path = "core/icu_provider" }
 boa_interner = { version = "~0.18.0", path = "core/interner" }
+boa_interop = { version = "~0.18.0", path = "core/interop" }
 boa_macros = { version = "~0.18.0", path = "core/macros" }
 boa_parser = { version = "~0.18.0", path = "core/parser" }
 boa_profiler = { version = "~0.18.0", path = "core/profiler" }
@@ -64,14 +60,14 @@ once_cell = { version = "1.19.0", default-features = false }
 phf = { version = "0.11.2", default-features = false }
 pollster = "0.3.0"
 regex = "1.10.4"
-regress = { version="0.9.1", features = ["utf16"]}
+regress = { version = "0.9.1", features = ["utf16"] }
 rustc-hash = { version = "1.1.0", default-features = false }
 serde_json = "1.0.115"
 serde = "1.0.197"
 static_assertions = "1.1.0"
 textwrap = "0.16.0"
 thin-vec = "0.2.13"
-time = {version = "0.3.34", default-features = false, features = ["local-offset", "large-dates", "wasm-bindgen", "parsing", "formatting", "macros"]}
+time = { version = "0.3.34", default-features = false, features = ["local-offset", "large-dates", "wasm-bindgen", "parsing", "formatting", "macros"] }
 tinystr = "0.7.5"
 log = "0.4.21"
 simple_logger = "4.3.3"

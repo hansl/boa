@@ -1,8 +1,14 @@
 //! This module contains the [`TryFromJs`] trait, and conversions to basic Rust types.
 
 use num_bigint::BigInt;
+use rustc_hash::FxHashMap;
+use std::hash::Hash;
 
-use crate::{js_string, Context, JsBigInt, JsNativeError, JsObject, JsResult, JsString, JsValue};
+use crate::object::JsMap;
+use crate::{
+    js_string, Context, JsArgs, JsBigInt, JsError, JsNativeError, JsObject, JsResult, JsString,
+    JsValue,
+};
 
 /// This trait adds a fallible and efficient conversions from a [`JsValue`] to Rust types.
 pub trait TryFromJs: Sized {
@@ -99,6 +105,56 @@ where
         }
 
         Ok(vec)
+    }
+}
+
+fn fx_hash_from_map<K: TryFromJs + Eq + Hash, V: TryFromJs>(
+    map: &JsMap,
+    context: &mut Context,
+) -> JsResult<FxHashMap<K, V>> {
+    let mut result = FxHashMap::default();
+
+    let it = map.entries(context)?;
+    loop {
+        let item = it.next(context)?;
+        let inner = item.create_list_from_array_like(&[], context)?;
+
+        let k: K = K::try_from_js(inner.get_or_undefined(0), context)?;
+        let v: V = V::try_from_js(inner.get_or_undefined(1), context)?;
+
+        result.insert(k, v);
+    }
+    Ok(result)
+}
+
+fn fx_hash_from_properties<K: TryFromJs + Eq + Hash, V: TryFromJs>(
+    object: &JsObject,
+    context: &mut Context,
+) -> JsResult<FxHashMap<K, V>> {
+    let properties = object.__own_property_keys__(context)?;
+    let mut result = FxHashMap::default();
+
+    for key in properties {
+        let value = object.get(key.clone(), context)?;
+        let k = K::try_from_js(&key.into(), context)?;
+        let v = V::try_from_js(&value, context)?;
+
+        result.insert(k, v);
+    }
+
+    Ok(result)
+}
+
+impl<K: TryFromJs + Eq + Hash, V: TryFromJs> TryFromJs for FxHashMap<K, V> {
+    fn try_from_js(value: &JsValue, context: &mut Context) -> JsResult<Self> {
+        let o = value.as_object().ok_or_else(|| {
+            JsError::from_native(JsNativeError::typ().with_message("Value must be an object"))
+        })?;
+
+        match JsMap::from_object(o.clone()) {
+            Ok(map) => fx_hash_from_map(&map, context),
+            Err(_e) => fx_hash_from_properties(o, context),
+        }
     }
 }
 

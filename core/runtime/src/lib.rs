@@ -61,7 +61,7 @@ pub use console::Console;
 
 #[cfg(feature = "fetch")]
 #[doc(inline)]
-pub use fetch::fetch;
+pub use fetch::Fetch;
 
 #[cfg(test)]
 pub(crate) mod test {

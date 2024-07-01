@@ -64,6 +64,7 @@ num-traits = "0.2.19"
 once_cell = { version = "1.19.0", default-features = false }
 phf = { version = "0.11.2", default-features = false }
 pollster = "0.3.0"
+profiling = "1.0.15"
 regex = "1.10.5"
 regress = { version="0.10.0", features = ["utf16"]}
 rustc-hash = { version = "1.1.0", default-features = false }

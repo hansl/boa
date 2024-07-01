@@ -157,6 +157,7 @@ impl Default for Context {
 }
 
 // ==== Public API ====
+#[profiling::all_functions]
 impl Context {
     /// Create a new [`ContextBuilder`] to specify the [`Interner`] and/or
     /// the icu data provider.

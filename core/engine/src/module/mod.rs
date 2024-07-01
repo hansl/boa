@@ -147,6 +147,7 @@ pub(crate) enum ResolveExportError {
     Ambiguous,
 }
 
+#[profiling::all_functions]
 impl Module {
     /// Abstract operation [`ParseModule ( sourceText, realm, hostDefined )`][spec].
     ///
@@ -559,9 +560,9 @@ impl Module {
                 context,
             );
 
-        // The main_timer needs to be dropped before the Profiler is.
-        drop(main_timer);
-        Profiler::global().drop();
+        // // The main_timer needs to be dropped before the Profiler is.
+        // drop(main_timer);
+        // Profiler::global().drop();
 
         promise
     }

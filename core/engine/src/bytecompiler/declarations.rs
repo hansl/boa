@@ -586,6 +586,7 @@ impl ByteCompiler<'_> {
                 .generator(generator)
                 .r#async(r#async)
                 .strict(self.strict())
+                .in_with(self.in_with)
                 .binding_identifier(Some(name.sym().to_js_string(self.interner())))
                 .compile(
                     parameters,
@@ -954,6 +955,7 @@ impl ByteCompiler<'_> {
                 .generator(generator)
                 .r#async(r#async)
                 .strict(self.strict())
+                .in_with(self.in_with)
                 .binding_identifier(Some(name.sym().to_js_string(self.interner())))
                 .compile(
                     parameters,
@@ -1180,6 +1182,7 @@ impl ByteCompiler<'_> {
                 //          default value initializers, or any destructured parameters.
                 // ii. Let ao be CreateMappedArgumentsObject(func, formals, argumentsList, env).
                 self.emit_opcode(Opcode::CreateMappedArgumentsObject);
+                self.emitted_mapped_arguments_object_opcode = true;
             }
 
             // c. If strict is true, then

@@ -14,7 +14,7 @@ mod utils;
 use std::{cell::Cell, rc::Rc};
 
 use crate::{
-    builtins::function::ThisMode,
+    builtins::function::{arguments::MappedArguments, ThisMode},
     environments::{BindingLocator, BindingLocatorError, CompileTimeEnvironment},
     js_string,
     vm::{
@@ -304,6 +304,12 @@ pub struct ByteCompiler<'ctx> {
     pub(crate) async_handler: Option<u32>,
     json_parse: bool,
 
+    /// Whether the function is in a `with` statement.
+    pub(crate) in_with: bool,
+
+    /// Used to determine if a we emited a `CreateUnmappedArgumentsObject` opcode
+    pub(crate) emitted_mapped_arguments_object_opcode: bool,
+
     pub(crate) interner: &'ctx mut Interner,
 
     #[cfg(feature = "annex-b")]
@@ -324,6 +330,7 @@ impl<'ctx> ByteCompiler<'ctx> {
         variable_environment: Rc<CompileTimeEnvironment>,
         lexical_environment: Rc<CompileTimeEnvironment>,
         interner: &'ctx mut Interner,
+        in_with: bool,
     ) -> ByteCompiler<'ctx> {
         let mut code_block_flags = CodeBlockFlags::empty();
         code_block_flags.set(CodeBlockFlags::STRICT, strict);
@@ -356,6 +363,8 @@ impl<'ctx> ByteCompiler<'ctx> {
 
             #[cfg(feature = "annex-b")]
             annex_b_function_names: Vec::new(),
+            in_with,
+            emitted_mapped_arguments_object_opcode: false,
         }
     }
 
@@ -1320,6 +1329,7 @@ impl<'ctx> ByteCompiler<'ctx> {
             .r#async(r#async)
             .strict(self.strict())
             .arrow(arrow)
+            .in_with(self.in_with)
             .binding_identifier(binding_identifier)
             .compile(
                 parameters,
@@ -1395,6 +1405,7 @@ impl<'ctx> ByteCompiler<'ctx> {
             .strict(self.strict())
             .arrow(arrow)
             .method(true)
+            .in_with(self.in_with)
             .binding_identifier(binding_identifier)
             .compile(
                 parameters,
@@ -1442,6 +1453,7 @@ impl<'ctx> ByteCompiler<'ctx> {
             .strict(true)
             .arrow(arrow)
             .method(true)
+            .in_with(self.in_with)
             .binding_identifier(binding_identifier)
             .compile(
                 parameters,
@@ -1481,8 +1493,19 @@ impl<'ctx> ByteCompiler<'ctx> {
                     if *ident == Sym::EVAL {
                         kind = CallKind::CallEval;
                     }
+
+                    if self.in_with {
+                        let name = self.resolve_identifier_expect(*ident);
+                        let binding = self.lexical_environment.get_identifier_reference(name);
+                        let index = self.get_or_insert_binding(binding.locator());
+                        self.emit_with_varying_operand(Opcode::ThisForObjectEnvironmentName, index);
+                    } else {
+                        self.emit_opcode(Opcode::PushUndefined);
+                    }
+                } else {
+                    self.emit_opcode(Opcode::PushUndefined);
                 }
-                self.emit_opcode(Opcode::PushUndefined);
+
                 self.compile_expr(expr, true);
             }
             expr => {
@@ -1556,12 +1579,19 @@ impl<'ctx> ByteCompiler<'ctx> {
             handler.stack_count += self.register_count;
         }
 
+        let mapped_arguments_binding_indices = if self.emitted_mapped_arguments_object_opcode {
+            MappedArguments::binding_indices(&self.params)
+        } else {
+            ThinVec::new()
+        };
+
         CodeBlock {
             name: self.function_name,
             length: self.length,
             register_count: self.register_count,
             this_mode: self.this_mode,
-            params: self.params,
+            parameter_length: self.params.as_ref().len() as u32,
+            mapped_arguments_binding_indices,
             bytecode: self.bytecode.into_boxed_slice(),
             constants: self.constants,
             bindings: self.bindings.into_boxed_slice(),

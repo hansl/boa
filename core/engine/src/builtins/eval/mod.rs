@@ -229,7 +229,7 @@ impl Eval {
             }
         });
 
-        let var_environment = context.vm.environments.outer_function_environment();
+        let var_environment = context.vm.environments.outer_function_environment().clone();
         let mut var_env = var_environment.compile_env();
 
         let lex_env = context.vm.environments.current_compile_environment();
@@ -246,6 +246,8 @@ impl Eval {
             context,
         )?;
 
+        let in_with = context.vm.environments.has_object_environment();
+
         let mut compiler = ByteCompiler::new(
             js_string!("<main>"),
             body.strict(),
@@ -253,6 +255,7 @@ impl Eval {
             var_env.clone(),
             lex_env.clone(),
             context.interner_mut(),
+            in_with,
         );
 
         compiler.current_open_environments_count += 1;

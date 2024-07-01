@@ -369,26 +369,11 @@ fn value_into_vec() {
 }
 
 #[test]
-fn value_into_map() {
+fn value_into_tuple() {
     use boa_engine::{run_test_actions, TestAction};
     use indoc::indoc;
 
     run_test_actions([
-        TestAction::assert_with_op(indoc! {r#" [] "#}, |value, context| {
-            type TestType = ();
-            TestType::try_from_js(&value, context).unwrap();
-            true
-        }),
-        TestAction::assert_with_op(indoc! {r#" 1 "#}, |value, context| {
-            type TestType = ();
-            TestType::try_from_js(&value, context).unwrap();
-            true
-        }),
-        TestAction::assert_with_op(indoc! {r#" [1, 2, 3] "#}, |value, context| {
-            type TestType = ();
-            TestType::try_from_js(&value, context).unwrap();
-            true
-        }),
         TestAction::assert_with_op(indoc! {r#" [42, "hello", true] "#}, |value, context| {
             type TestType = (i32, String, bool);
             TestType::try_from_js(&value, context).unwrap() == (42, "hello".to_string(), true)
@@ -424,14 +409,6 @@ fn value_into_map() {
         }),
         TestAction::assert_with_op(indoc!(r#"[42, "hello"]"#), |value, context| {
             type TestType = (i32, String, bool);
-            let Err(value) = TestType::try_from_js(&value, context) else {
-                return false;
-            };
-            assert!(value.to_string().contains("TypeError"));
-            true
-        }),
-        TestAction::assert_with_op(indoc!(r#" null "#), |value, context| {
-            type TestType = ();
             let Err(value) = TestType::try_from_js(&value, context) else {
                 return false;
             };
@@ -442,74 +419,46 @@ fn value_into_map() {
 }
 
 #[test]
-fn value_into_tuple() {
+fn value_into_map() {
     use boa_engine::{run_test_actions, TestAction};
     use indoc::indoc;
 
     run_test_actions([
-        TestAction::assert_with_op(indoc! {r#" [] "#}, |value, context| {
-            type TestType = ();
-            TestType::try_from_js(&value, context).unwrap();
-            true
+        TestAction::assert_with_op(indoc! {r#" ({ a: 1, b: 2, c: 3 }) "#}, |value, context| {
+            let value = std::collections::BTreeMap::<String, i32>::try_from_js(&value, context);
+
+            match value {
+                Ok(value) => {
+                    value
+                        == vec![
+                            ("a".to_string(), 1),
+                            ("b".to_string(), 2),
+                            ("c".to_string(), 3),
+                        ]
+                        .into_iter()
+                        .collect::<std::collections::BTreeMap<String, i32>>()
+                }
+                _ => false,
+            }
         }),
-        TestAction::assert_with_op(indoc! {r#" 1 "#}, |value, context| {
-            type TestType = ();
-            TestType::try_from_js(&value, context).unwrap();
-            true
-        }),
-        TestAction::assert_with_op(indoc! {r#" [1, 2, 3] "#}, |value, context| {
-            type TestType = ();
-            TestType::try_from_js(&value, context).unwrap();
-            true
-        }),
-        TestAction::assert_with_op(indoc! {r#" [42, "hello", true] "#}, |value, context| {
-            type TestType = (i32, String, bool);
-            TestType::try_from_js(&value, context).unwrap() == (42, "hello".to_string(), true)
-        }),
-        TestAction::assert_with_op(indoc! {r#" [42, "hello", true] "#}, |value, context| {
-            type TestType = (i32, String, Option<bool>, Option<u8>);
-            TestType::try_from_js(&value, context).unwrap()
-                == (42, "hello".to_string(), Some(true), None)
-        }),
-        TestAction::assert_with_op(indoc! {r#" [] "#}, |value, context| {
-            type TestType = (
-                Option<bool>,
-                Option<bool>,
-                Option<bool>,
-                Option<bool>,
-                Option<bool>,
-                Option<bool>,
-                Option<bool>,
-                Option<bool>,
-                Option<bool>,
-                Option<bool>,
-            );
-            TestType::try_from_js(&value, context).unwrap()
-                == (None, None, None, None, None, None, None, None, None, None)
-        }),
-        TestAction::assert_with_op(indoc!(r#"[42, "hello", {}]"#), |value, context| {
-            type TestType = (i32, String, bool);
-            let Err(value) = TestType::try_from_js(&value, context) else {
-                return false;
-            };
-            assert!(value.to_string().contains("TypeError"));
-            true
-        }),
-        TestAction::assert_with_op(indoc!(r#"[42, "hello"]"#), |value, context| {
-            type TestType = (i32, String, bool);
-            let Err(value) = TestType::try_from_js(&value, context) else {
-                return false;
-            };
-            assert!(value.to_string().contains("TypeError"));
-            true
-        }),
-        TestAction::assert_with_op(indoc!(r#" null "#), |value, context| {
-            type TestType = ();
-            let Err(value) = TestType::try_from_js(&value, context) else {
-                return false;
-            };
-            assert!(value.to_string().contains("TypeError"));
-            true
+        TestAction::assert_with_op(indoc! {r#" ({ a: 1, b: 2, c: 3 }) "#}, |value, context| {
+            let value = std::collections::HashMap::<String, i32>::try_from_js(&value, context);
+
+            match value {
+                Ok(value) => {
+                    value
+                        == std::collections::HashMap::from_iter(
+                            vec![
+                                ("a".to_string(), 1),
+                                ("b".to_string(), 2),
+                                ("c".to_string(), 3),
+                            ]
+                            .into_iter()
+                            .collect::<std::collections::BTreeMap<String, i32>>(),
+                        )
+                }
+                _ => false,
+            }
         }),
     ]);
 }

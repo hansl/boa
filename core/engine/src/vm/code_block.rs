@@ -12,7 +12,6 @@ use crate::{
     Context, JsBigInt, JsString, JsValue,
 };
 use bitflags::bitflags;
-use boa_ast::function::FormalParameterList;
 use boa_gc::{empty_trace, Finalize, Gc, Trace};
 use boa_profiler::Profiler;
 use std::{cell::Cell, fmt::Display, mem::size_of, rc::Rc};
@@ -137,14 +136,16 @@ pub struct CodeBlock {
     /// The number of arguments expected.
     pub(crate) length: u32,
 
+    pub(crate) parameter_length: u32,
+
     pub(crate) register_count: u32,
 
     /// `[[ThisMode]]`
     pub(crate) this_mode: ThisMode,
 
-    /// Parameters passed to this function.
+    /// Used for constructing a `MappedArguments` object.
     #[unsafe_ignore_trace]
-    pub(crate) params: FormalParameterList,
+    pub(crate) mapped_arguments_binding_indices: ThinVec<Option<u32>>,
 
     /// Bytecode
     #[unsafe_ignore_trace]
@@ -180,7 +181,8 @@ impl CodeBlock {
             length,
             register_count: 0,
             this_mode: ThisMode::Global,
-            params: FormalParameterList::default(),
+            mapped_arguments_binding_indices: ThinVec::new(),
+            parameter_length: 0,
             handlers: ThinVec::default(),
             ic: Box::default(),
         }
@@ -611,6 +613,7 @@ impl CodeBlock {
             | Instruction::Exception
             | Instruction::MaybeException
             | Instruction::This
+            | Instruction::ThisForObjectEnvironmentName { .. }
             | Instruction::Super
             | Instruction::CheckReturn
             | Instruction::Return
@@ -719,8 +722,7 @@ impl CodeBlock {
             | Instruction::Reserved50
             | Instruction::Reserved51
             | Instruction::Reserved52
-            | Instruction::Reserved53
-            | Instruction::Reserved54 => unreachable!("Reserved opcodes are unrechable"),
+            | Instruction::Reserved53 => unreachable!("Reserved opcodes are unrechable"),
         }
     }
 }

@@ -28,7 +28,7 @@ exclude = [
 
 [workspace.package]
 edition = "2021"
-version = "0.18.0"
+version = "0.19.0"
 rust-version = "1.79.0"
 authors = ["boa-dev"]
 repository = "https://github.com/boa-dev/boa"
@@ -38,21 +38,22 @@ description = "Boa is a Javascript lexer, parser and compiler written in Rust. C
 [workspace.dependencies]
 
 # Repo Crates
-boa_ast = { version = "~0.18.0", path = "core/ast" }
-boa_engine = { version = "~0.18.0", path = "core/engine" }
-boa_gc = { version = "~0.18.0", path = "core/gc" }
-boa_icu_provider = { version = "~0.18.0", path = "core/icu_provider" }
-boa_interner = { version = "~0.18.0", path = "core/interner" }
-boa_macros = { version = "~0.18.0", path = "core/macros" }
-boa_parser = { version = "~0.18.0", path = "core/parser" }
-boa_profiler = { version = "~0.18.0", path = "core/profiler" }
-boa_runtime = { version = "~0.18.0", path = "core/runtime" }
-boa_string = { version = "~0.18.0", path = "core/string" }
+boa_ast = { version = "~0.19.0", path = "core/ast" }
+boa_engine = { version = "~0.19.0", path = "core/engine" }
+boa_gc = { version = "~0.19.0", path = "core/gc" }
+boa_icu_provider = { version = "~0.19.0", path = "core/icu_provider" }
+boa_interner = { version = "~0.19.0", path = "core/interner" }
+boa_interop = { version = "~0.19.0", path = "core/interop" }
+boa_macros = { version = "~0.19.0", path = "core/macros" }
+boa_parser = { version = "~0.19.0", path = "core/parser" }
+boa_profiler = { version = "~0.19.0", path = "core/profiler" }
+boa_runtime = { version = "~0.19.0", path = "core/runtime" }
+boa_string = { version = "~0.19.0", path = "core/string" }
 
 # Shared deps
 arbitrary = "1"
 bitflags = "2.5.0"
-clap = "4.5.8"
+clap = "4.5.9"
 colored = "2.1.0"
 fast-float = "0.2.0"
 hashbrown = { version = "0.14.5", default-features = false }
@@ -94,7 +95,7 @@ isahc = "1.7.2"
 rustyline = { version = "14.0.0", default-features = false }
 dhat = "0.3.3"
 quote = "1.0.36"
-syn = { version = "2.0.69", default-features = false }
+syn = { version = "2.0.71", default-features = false }
 proc-macro2 = "1.0"
 synstructure = "0.13"
 measureme = "11.0.1"
@@ -104,7 +105,7 @@ rand = "0.8.5"
 num-integer = "0.1.46"
 ryu-js = "1.0.1"
 tap = "1.0.1"
-thiserror = "1.0.60"
+thiserror = "1.0.62"
 dashmap = "5.5.3"
 num_enum = "0.7.2"
 itertools = { version = "0.13.0", default-features = false }

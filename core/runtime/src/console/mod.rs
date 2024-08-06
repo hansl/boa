@@ -15,15 +15,15 @@
 mod tests;
 
 use boa_engine::{
-    js_str, js_string,
+    js_error, js_str, js_string,
     native_function::NativeFunction,
     object::{JsObject, ObjectInitializer},
     value::{JsValue, Numeric},
-    Context, JsArgs, JsData, JsResult, JsStr, JsString,
+    Context, JsArgs, JsData, JsError, JsResult, JsStr, JsString,
 };
 use boa_gc::{Finalize, Trace};
 use rustc_hash::FxHashMap;
-use std::{cell::RefCell, collections::hash_map::Entry, rc::Rc, time::SystemTime};
+use std::{cell::RefCell, collections::hash_map::Entry, fmt, rc::Rc, time::SystemTime};
 
 /// A trait that can be used to forward console logs to an implementation.
 pub trait Logger: Trace + Sized {
@@ -87,41 +87,52 @@ impl Logger for DefaultLogger {
 }
 
 /// This represents the `console` formatter.
-fn formatter(data: &[JsValue], context: &mut Context) -> JsResult<String> {
+fn formatter(data: &[JsValue], f: &mut fmt::Formatter<'_>, context: &mut Context) -> JsResult<()> {
     match data {
-        [] => Ok(String::new()),
-        [val] => Ok(val.to_string(context)?.to_std_string_escaped()),
+        [] => {}
+        [val] => {
+            write!(f, "{}", val.to_string(context)?.to_std_string_escaped())
+                .map_err(JsError::from_rust)?;
+        }
         data => {
-            let mut formatted = String::new();
             let mut arg_index = 1;
             let target = data
                 .get_or_undefined(0)
                 .to_string(context)?
                 .to_std_string_escaped();
-            let mut chars = target.chars();
-            while let Some(c) = chars.next() {
+            let mut substr = target.split('%').peekable();
+            // First string will always be outputted as is.
+            write!(f, "{}", substr.next().unwrap_or("")).map_err(JsError::from_rust)?;
+            while let Some(str) = substr.next() {
+                // All strings after the first will have a formatting first character.
+                let c = str.get(0).unwrap_or(&'%');
+                let str = &str[1..];
+
                 if c == '%' {
-                    let fmt = chars.next().unwrap_or('%');
+                    let fmt = substr.next().unwrap_or("%");
                     match fmt {
                         /* integer */
                         'd' | 'i' => {
-                            let arg = match data.get_or_undefined(arg_index).to_numeric(context)? {
-                                Numeric::Number(r) => (r.floor() + 0.0).to_string(),
-                                Numeric::BigInt(int) => int.to_string(),
+                            match data.get_or_undefined(arg_index).to_numeric(context)? {
+                                Numeric::Number(r) => {
+                                    write!(f, "{}", r as u64).map_err(JsError::from_rust)?;
+                                }
+                                Numeric::BigInt(int) => {
+                                    write!(f, "{}", int).map_err(JsError::from_rust)?;
+                                }
                             };
-                            formatted.push_str(&arg);
                             arg_index += 1;
                         }
                         /* float */
                         'f' => {
                             let arg = data.get_or_undefined(arg_index).to_number(context)?;
-                            formatted.push_str(&format!("{arg:.6}"));
+                            write!(f, "{:.6}", arg).map_err(JsError::from_rust)?;
                             arg_index += 1;
                         }
                         /* object, FIXME: how to render this properly? */
                         'o' | 'O' => {
                             let arg = data.get_or_undefined(arg_index);
-                            formatted.push_str(&arg.display().to_string());
+                            write!(f, "{}", arg.display()).map_err(JsError::from_rust)?;
                             arg_index += 1;
                         }
                         /* string */
@@ -130,14 +141,14 @@ fn formatter(data: &[JsValue], context: &mut Context) -> JsResult<String> {
                                 .get_or_undefined(arg_index)
                                 .to_string(context)?
                                 .to_std_string_escaped();
-                            formatted.push_str(&arg);
+                            write!(f, "{}", arg).map_err(JsError::from_rust)?;
                             arg_index += 1;
                         }
-                        '%' => formatted.push('%'),
-                        /* TODO: %c is not implemented */
+                        '%' => write!(f, "%").map_err(JsError::from_rust)?,
+                        /* TODO: %c is not implemented, but we still skip the argument. */
+                        'c' => arg_index += 1,
                         c => {
-                            formatted.push('%');
-                            formatted.push(c);
+                            write!(f, "%{}", c).map_err(JsError::from_rust)?;
                         }
                     }
                 } else {
@@ -152,10 +163,9 @@ fn formatter(data: &[JsValue], context: &mut Context) -> JsResult<String> {
                     rest.to_string(context)?.to_std_string_escaped()
                 ));
             }
-
-            Ok(formatted)
         }
     }
+    Ok(())
 }
 
 /// This is the internal console object state.

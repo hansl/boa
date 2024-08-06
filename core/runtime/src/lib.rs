@@ -60,7 +60,7 @@ pub use console::Console;
 pub use console::Logger;
 
 #[cfg(test)]
-pub(crate) mod test {
+}pub(crate) mod test {
     use boa_engine::{builtins, Context, JsResult, JsValue, Source};
     use std::borrow::Cow;
 

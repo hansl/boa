@@ -1,6 +1,6 @@
 use super::{formatter, Console};
 use crate::test::{run_test_actions, run_test_actions_with, TestAction};
-use boa_engine::{js_string, property::Attribute, Context, JsValue};
+use boa_engine::{js_string, Context, JsValue};
 use indoc::indoc;
 
 #[test]
@@ -95,10 +95,7 @@ fn formatter_float_format_works() {
 #[test]
 fn console_log_cyclic() {
     let mut context = Context::default();
-    let console = Console::init(&mut context);
-    context
-        .register_global_property(js_string!(Console::NAME), console, Attribute::all())
-        .unwrap();
+    Console::register(&mut context).unwrap();
 
     run_test_actions_with(
         [TestAction::run(indoc! {r#"

@@ -26,7 +26,7 @@ use boa_engine::{
 use boa_gc::{Finalize, Gc, GcRef, GcRefCell, GcRefMut, Trace};
 use boa_interop::{ContextData, IntoJsFunctionCopied, JsRest, TryFromJsArgument};
 use rustc_hash::FxHashMap;
-use std::fmt::Write;
+use std::fmt::{Display, Formatter, Write};
 use std::ops::Deref;
 use std::{cell::RefCell, collections::hash_map::Entry, rc::Rc, time::SystemTime};
 
@@ -226,16 +226,15 @@ pub struct ConsoleState {
     pub groups: Vec<String>,
 }
 
-pub struct FormattedJsArgs<'a> {
-    args: &'a [JsValue],
-}
+pub struct FormattedJsArgs(pub String);
 
-impl<'a> TryFromJsArgument<'a> for FormattedJsArgs<'a> {
+impl<'a> TryFromJsArgument<'a> for FormattedJsArgs {
     fn try_from_js_argument(
-        this: &'a JsValue,
+        _: &'a JsValue,
         rest: &'a [JsValue],
         context: &mut Context,
     ) -> JsResult<(Self, &'a [JsValue])> {
+        Ok((FormattedJsArgs(formatter(rest, context)?), &[]))
     }
 }
 
@@ -253,7 +252,7 @@ impl<'a> TryFromJsArgument<'a> for FormattedJsArgs<'a> {
 fn assert(
     ContextData(console): ContextData<ConsoleData>,
     Convert(assertion): Convert<bool>,
-    JsRest(args): JsRest<'_>,
+    args: FormattedJsArgs,
     context: &mut Context,
 ) -> JsResult<()> {
     if !assertion {
@@ -269,7 +268,7 @@ fn assert(
             args[0] = JsValue::new(concat);
         }
 
-        console.error(formatter(&args, context)?)?;
+        console.error(args.0)?;
     }
 
     Ok(())
@@ -300,12 +299,8 @@ fn clear(ContextData(console): ContextData<ConsoleData>) {
 ///
 /// [spec]: https://console.spec.whatwg.org/#debug
 /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/debug
-fn debug(
-    ContextData(console): ContextData<ConsoleData>,
-    JsRest(args): JsRest<'_>,
-    context: &mut Context,
-) -> JsResult<()> {
-    console.log(formatter(args, context)?)
+fn debug(ContextData(console): ContextData<ConsoleData>, args: FormattedJsArgs) -> JsResult<()> {
+    console.log(args.0)
 }
 
 /// `console.error(...data)`
@@ -318,12 +313,8 @@ fn debug(
 ///
 /// [spec]: https://console.spec.whatwg.org/#error
 /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/error
-fn error(
-    ContextData(console): ContextData<ConsoleData>,
-    JsRest(args): JsRest<'_>,
-    context: &mut Context,
-) -> JsResult<()> {
-    console.error(formatter(args, context)?)
+fn error(ContextData(console): ContextData<ConsoleData>, args: FormattedJsArgs) -> JsResult<()> {
+    console.error(args.0)
 }
 
 /// `console.info(...data)`
@@ -336,12 +327,8 @@ fn error(
 ///
 /// [spec]: https://console.spec.whatwg.org/#info
 /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/info
-fn info(
-    ContextData(console): ContextData<ConsoleData>,
-    JsRest(args): JsRest<'_>,
-    context: &mut Context,
-) -> JsResult<()> {
-    console.info(formatter(args, context)?)
+fn info(ContextData(console): ContextData<ConsoleData>, args: FormattedJsArgs) -> JsResult<()> {
+    console.info(args.0)
 }
 
 /// `console.log(...data)`
@@ -354,13 +341,8 @@ fn info(
 ///
 /// [spec]: https://console.spec.whatwg.org/#log
 /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/log
-fn log(
-    ContextData(console): ContextData<ConsoleData>,
-    JsRest(args): JsRest<'_>,
-    context: &mut Context,
-) -> JsResult<()> {
-    let console = &*console.borrow();
-    console.info(formatter(args, context)?)
+fn log(ContextData(console): ContextData<ConsoleData>, args: FormattedJsArgs) -> JsResult<()> {
+    console.info(args.0)
 }
 
 /// `console.trace(...data)`
@@ -373,13 +355,9 @@ fn log(
 ///
 /// [spec]: https://console.spec.whatwg.org/#trace
 /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/trace
-fn trace(
-    ContextData(console): ContextData<ConsoleData>,
-    JsRest(args): JsRest<'_>,
-    context: &mut Context,
-) -> JsResult<()> {
-    if !args.is_empty() {
-        console.log(formatter(args, context)?)?;
+fn trace(ContextData(console): ContextData<ConsoleData>, args: FormattedJsArgs) -> JsResult<()> {
+    if !args.0.is_empty() {
+        console.log(args.0)?;
     }
 
     let stack_trace_dump = context
@@ -403,12 +381,8 @@ fn trace(
 ///
 /// [spec]: https://console.spec.whatwg.org/#warn
 /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/console/warn
-fn warn(
-    ContextData(console): ContextData<ConsoleData>,
-    JsRest(args): JsRest<'_>,
-    context: &mut Context,
-) -> JsResult<()> {
-    console.warn(formatter(args, context)?)
+fn warn(ContextData(console): ContextData<ConsoleData>, args: FormattedJsArgs) -> JsResult<()> {
+    console.warn(args.0)
 }
 
 /// `console.count(label)`
@@ -424,15 +398,18 @@ fn warn(
 fn count(
     ContextData(console): ContextData<ConsoleData>,
     label: Option<Convert<JsString>>,
-    context: &mut Context,
 ) -> JsResult<()> {
     let label = label.map_or(js_string!("default"), |c| c.0);
 
-    let msg = format!("count {}:", label.display_escaped());
-    let c = console.state_mut().count_map.entry(label).or_insert(0);
-    *c += 1;
+    let msg = label.display_escaped().to_string();
+    let c = *console
+        .state_mut()
+        .count_map
+        .entry(label)
+        .and_modify(|c| *c += 1)
+        .or_insert(1);
 
-    console.info(format!("{msg} {c}"))
+    console.info(format!("count {msg}: {c}"))
 }
 
 /// `console.countReset(label)`

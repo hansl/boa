@@ -535,6 +535,9 @@ version = "0.19.0"
 dependencies = [
  "boa_engine",
  "boa_gc",
+ "boa_interop",
+ "either",
+ "http 1.1.0",
  "indoc",
  "rustc-hash 2.0.0",
  "textwrap",
@@ -1454,6 +1457,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "http"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21b9ddb458710bc376481b842f5da65cdf31522de232c1ca8146abce2a358258"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
+]
+
+[[package]]
 name = "icu"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2000,7 +2014,7 @@ dependencies = [
  "encoding_rs",
  "event-listener 2.5.3",
  "futures-lite 1.13.0",
- "http",
+ "http 0.2.12",
  "log",
  "mime",
  "once_cell",

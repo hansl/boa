@@ -9,9 +9,10 @@
 
 use boa_engine::object::builtins::JsPromise;
 use boa_engine::value::{Convert, TryFromJs};
-use boa_engine::{Context, Finalize, JsError, JsNativeError, JsResult, JsString, JsValue};
+use boa_engine::{js_error, Context, Finalize, JsData, JsObject, JsResult, JsString, JsValue};
 use boa_gc::Trace;
-use boa_interop::js_class;
+use boa_interop::{js_class, JsClass};
+use either::Either;
 use http::{Request as HttpRequest, Response as HttpResponse};
 use std::collections::BTreeMap;
 
@@ -34,22 +35,23 @@ pub trait Fetcher<Body>: Trace + Sized {
 ///
 /// [mdn]:https://developer.mozilla.org/en-US/docs/Web/API/RequestInit
 // TODO: This class does not contain all fields that are defined in the spec.
-#[derive(Clone, Trace, Finalize)]
+#[derive(Debug, Clone, TryFromJs, Trace, Finalize)]
 pub struct RequestInit {
     body: Option<JsValue>,
-    credentials: Option<JsString>,
     headers: Option<BTreeMap<JsString, Convert<JsString>>>,
     method: Option<Convert<JsString>>,
 }
 
 impl RequestInit {
+    /// Create a [`http::request::Builder`] object and return both the
+    /// body specified by JavaScript and the builder.
     fn into_request_builder(
-        self,
+        mut self,
         maybe_request: Option<HttpRequest<()>>,
     ) -> JsResult<(Option<JsValue>, http::request::Builder)> {
         let mut builder = HttpRequest::builder();
         if let Some(r) = maybe_request {
-            let (parts, body) = r.into_parts();
+            let (parts, _body) = r.into_parts();
             builder = builder
                 .method(parts.method)
                 .uri(parts.uri)
@@ -60,7 +62,37 @@ impl RequestInit {
             }
         }
 
-        todo!()
+        if let Some(ref headers) = self.headers.take() {
+            for (hkey, Convert(ref hvalue)) in headers {
+                // Make sure key and value can be represented by regular strings.
+                // Keys also cannot have any extended characters (>128).
+                // Values cannot have unpaired surrogates.
+                let key = hkey.to_std_string().map_err(|_| {
+                    js_error!(TypeError: "Request constructor: {} is an invalid header name", hkey.to_std_string_escaped())
+                })?;
+                if key.chars().any(|c| !c.is_ascii()) {
+                    return Err(
+                        js_error!(TypeError: "Request constructor: {} is an invalid header name", hkey.to_std_string_escaped()),
+                    );
+                }
+                let value = hvalue.to_std_string().map_err(|_| {
+                    js_error!(
+                        TypeError: "Request constructor: {:?} is an invalid header value",
+                        hvalue.to_std_string_escaped()
+                    )
+                })?;
+
+                builder = builder.header(key, value);
+            }
+        }
+
+        if let Some(Convert(method)) = self.method.take() {
+            builder = builder.method(method.to_std_string().map_err(
+                |_| js_error!(TypeError: "Requestion constructor: {} is an invalid method", method.to_std_string_escaped()),
+            )?.as_str())
+        }
+
+        Ok((self.body.take(), builder))
     }
 }
 
@@ -69,28 +101,69 @@ impl RequestInit {
 /// The `Request` interface of the [Fetch API][mdn] represents a resource request.
 ///
 /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API
-#[derive(Clone)]
-pub struct JsRequest(HttpRequest<()>, Option<JsValue>);
+#[derive(Debug, Clone, JsData, Trace, Finalize)]
+pub struct JsRequest {
+    #[unsafe_ignore_trace]
+    inner: HttpRequest<()>,
+    body: Option<JsValue>,
+}
 
 impl JsRequest {
     /// Create a [`JsRequest`] instance from JavaScript arguments, similar to
     /// calling its constructor in JavaScript.
     pub fn create_from_js(
-        input: either::Either<JsString, JsRequest>,
+        input: Either<JsString, JsRequest>,
         options: Option<RequestInit>,
-        context: &mut Context,
     ) -> JsResult<Self> {
+        let request = match input {
+            Either::Left(uri) => {
+                let uri = http::Uri::try_from(
+                    uri.to_std_string()
+                        .map_err(|_| js_error!(URIError: "URI cannot have unpaired surrogates"))?,
+                )
+                .map_err(|_| js_error!(URIError: "Invalid URI"))?;
+                http::request::Request::builder()
+                    .uri(uri)
+                    .body(())
+                    .map_err(|_| js_error!(Error: "Cannot construct request"))?
+            }
+            Either::Right(r) => r.inner,
+        };
+
+        if let Some(options) = options {
+            let (body, builder) = options.into_request_builder(Some(request))?;
+            Ok(Self {
+                inner: builder
+                    .body(())
+                    .map_err(|_| js_error!(Error: "Cannot construct request"))?,
+                body,
+            })
+        } else {
+            Ok(Self {
+                inner: request,
+                body: None,
+            })
+        }
     }
 }
 
 js_class! {
     class JsRequest as "Request" {
         constructor(
-            input: either::Either<JsString, JsRequest>,
-            options: Option<RequestInit>,
-            context: &mut Context
+            input: Either<JsString, JsObject>,
+            options: Option<RequestInit>
         ) {
-            JsRequest::create_from_js(input, options, context)
+            let input = match input {
+                Either::Left(i) => Either::Left(i),
+                Either::Right(r) => {
+                    if let Ok(request) = r.clone().downcast::<JsRequest>() {
+                        Either::Right(request)
+                    } else {
+                        return Err(js_error!(TypeError: "invalid input argument"));
+                    }
+                }
+            };
+            JsRequest::create_from_js(input, options)
         }
     }
 }

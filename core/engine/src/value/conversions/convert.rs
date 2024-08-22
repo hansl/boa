@@ -7,7 +7,7 @@
 //! if necessary).
 
 use boa_engine::JsNativeError;
-use boa_gc::{Trace, Tracer};
+use boa_gc::{Finalize, Trace, Tracer};
 
 use crate::value::TryFromJs;
 use crate::{Context, JsData, JsResult, JsString, JsValue};
@@ -48,17 +48,19 @@ pub struct Convert<T: TryFromJs>(pub T);
 
 impl<T: TryFromJs + JsData> JsData for Convert<T> {}
 
-unsafe impl<T: TryFromJs + Trace> Trace for Convert<T> {
+impl<T: TryFromJs + Finalize> Finalize for Convert<T> {}
+
+unsafe impl<T: TryFromJs + Trace + Finalize> Trace for Convert<T> {
     unsafe fn trace(&self, tracer: &mut Tracer) {
-        self.0.trace(tracer)
+        unsafe { self.0.trace(tracer) }
     }
 
     unsafe fn trace_non_roots(&self) {
-        self.0.trace_non_roots()
+        unsafe { self.0.trace_non_roots() }
     }
 
     fn run_finalizer(&self) {
-        self.0.run_finalizer()
+        self.0.run_finalizer();
     }
 }
 

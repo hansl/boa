@@ -34,7 +34,7 @@ pub trait Fetcher<Body>: Trace + Sized {
 ///
 /// [mdn]:https://developer.mozilla.org/en-US/docs/Web/API/RequestInit
 // TODO: This class does not contain all fields that are defined in the spec.
-#[derive(Clone, Trace, Finalize)]
+#[derive(Clone, TryFromJs, Trace, Finalize)]
 pub struct RequestInit {
     body: Option<JsValue>,
     headers: Option<BTreeMap<JsString, Convert<JsString>>>,
@@ -45,7 +45,7 @@ impl RequestInit {
     /// Create a [`http::request::Builder`] object and return both the
     /// body specified by JavaScript and the builder.
     fn into_request_builder(
-        self,
+        mut self,
         maybe_request: Option<HttpRequest<()>>,
     ) -> JsResult<(Option<JsValue>, http::request::Builder)> {
         let mut builder = HttpRequest::builder();
@@ -61,23 +61,23 @@ impl RequestInit {
             }
         }
 
-        if let Some(headers) = self.headers {
-            for (key, Convert(ref value)) in &headers {
+        if let Some(ref headers) = self.headers.take() {
+            for (hkey, Convert(ref hvalue)) in headers {
                 // Make sure key and value can be represented by regular strings.
                 // Keys also cannot have any extended characters (>128).
                 // Values cannot have unpaired surrogates.
-                let key = key.to_std_string().map_err(|_| {
-                    js_error!(TypeError: "Request constructor: {} is an invalid header name", key.to_std_string_escaped())
+                let key = hkey.to_std_string().map_err(|_| {
+                    js_error!(TypeError: "Request constructor: {} is an invalid header name", hkey.to_std_string_escaped())
                 })?;
                 if key.chars().any(|c| !c.is_ascii()) {
                     return Err(
-                        js_error!(TypeError: "Request constructor: {} is an invalid header name", key),
+                        js_error!(TypeError: "Request constructor: {} is an invalid header name", hkey.to_std_string_escaped()),
                     );
                 }
-                let value = value.to_std_string().map_err(|_| {
+                let value = hvalue.to_std_string().map_err(|_| {
                     js_error!(
                         TypeError: "Request constructor: {:?} is an invalid header value",
-                        value
+                        hvalue.to_std_string_escaped()
                     )
                 })?;
 
@@ -85,13 +85,13 @@ impl RequestInit {
             }
         }
 
-        if let Some(method) = self.method {
-            builder = builder.method(method.0.to_std_string().map_err(
-                |_| js_error!(TypeError: "Requestion constructor: {} is an invalid method", method),
-            ))
+        if let Some(Convert(method)) = self.method.take() {
+            builder = builder.method(method.to_std_string().map_err(
+                |_| js_error!(TypeError: "Requestion constructor: {} is an invalid method", method.to_std_string_escaped()),
+            )?.as_str())
         }
 
-        todo!()
+        Ok((self.body.take(), builder))
     }
 }
 
@@ -107,13 +107,18 @@ pub struct JsRequest {
     body: Option<JsValue>,
 }
 
+impl TryFromJs for JsRequest {
+    fn try_from_js(value: &JsValue, context: &mut Context) -> JsResult<Self> {
+        todo!()
+    }
+}
+
 impl JsRequest {
     /// Create a [`JsRequest`] instance from JavaScript arguments, similar to
     /// calling its constructor in JavaScript.
     pub fn create_from_js(
         input: either::Either<JsString, JsRequest>,
         options: Option<RequestInit>,
-        context: &mut Context,
     ) -> JsResult<Self> {
         todo!()
     }
@@ -123,10 +128,9 @@ js_class! {
     class JsRequest as "Request" {
         constructor(
             input: either::Either<JsString, JsRequest>,
-            options: Option<RequestInit>,
-            context: &mut Context
+            options: Option<RequestInit>
         ) {
-            JsRequest::create_from_js(input, options, context)
+            JsRequest::create_from_js(input, options, )
         }
     }
 }

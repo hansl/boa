@@ -60,7 +60,7 @@ unsafe impl<T: TryFromJs + Trace + Finalize> Trace for Convert<T> {
     }
 
     fn run_finalizer(&self) {
-        self.0.run_finalizer()
+        self.0.run_finalizer();
     }
 }
 

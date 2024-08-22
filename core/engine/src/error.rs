@@ -57,6 +57,18 @@ use thiserror::Error;
 /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError
 #[macro_export]
 macro_rules! js_error {
+    (Error: $value: literal) => {
+        $crate::JsError::from_native(
+            $crate::JsNativeError::error().with_message($value)
+        )
+    };
+    (Error: $value: literal $(, $args: expr)* $(,)?) => {
+        $crate::JsError::from_native(
+            $crate::JsNativeError::error()
+                .with_message(format!($value $(, $args)*))
+        )
+    };
+
     (TypeError: $value: literal) => {
         $crate::JsError::from_native(
             $crate::JsNativeError::typ().with_message($value)

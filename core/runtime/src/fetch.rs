@@ -9,9 +9,10 @@
 
 use boa_engine::object::builtins::JsPromise;
 use boa_engine::value::{Convert, TryFromJs};
-use boa_engine::{js_error, Context, Finalize, JsData, JsResult, JsString, JsValue};
+use boa_engine::{js_error, Context, Finalize, JsData, JsObject, JsResult, JsString, JsValue};
 use boa_gc::Trace;
-use boa_interop::js_class;
+use boa_interop::{js_class, JsClass};
+use either::Either;
 use http::{Request as HttpRequest, Response as HttpResponse};
 use std::collections::BTreeMap;
 
@@ -34,7 +35,7 @@ pub trait Fetcher<Body>: Trace + Sized {
 ///
 /// [mdn]:https://developer.mozilla.org/en-US/docs/Web/API/RequestInit
 // TODO: This class does not contain all fields that are defined in the spec.
-#[derive(Clone, TryFromJs, Trace, Finalize)]
+#[derive(Debug, Clone, TryFromJs, Trace, Finalize)]
 pub struct RequestInit {
     body: Option<JsValue>,
     headers: Option<BTreeMap<JsString, Convert<JsString>>>,
@@ -50,7 +51,7 @@ impl RequestInit {
     ) -> JsResult<(Option<JsValue>, http::request::Builder)> {
         let mut builder = HttpRequest::builder();
         if let Some(r) = maybe_request {
-            let (parts, body) = r.into_parts();
+            let (parts, _body) = r.into_parts();
             builder = builder
                 .method(parts.method)
                 .uri(parts.uri)
@@ -100,37 +101,69 @@ impl RequestInit {
 /// The `Request` interface of the [Fetch API][mdn] represents a resource request.
 ///
 /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API
-#[derive(Clone, JsData, Trace, Finalize)]
+#[derive(Debug, Clone, JsData, Trace, Finalize)]
 pub struct JsRequest {
     #[unsafe_ignore_trace]
     inner: HttpRequest<()>,
     body: Option<JsValue>,
 }
 
-impl TryFromJs for JsRequest {
-    fn try_from_js(value: &JsValue, context: &mut Context) -> JsResult<Self> {
-        todo!()
-    }
-}
-
 impl JsRequest {
     /// Create a [`JsRequest`] instance from JavaScript arguments, similar to
     /// calling its constructor in JavaScript.
     pub fn create_from_js(
-        input: either::Either<JsString, JsRequest>,
+        input: Either<JsString, JsRequest>,
         options: Option<RequestInit>,
     ) -> JsResult<Self> {
-        todo!()
+        let request = match input {
+            Either::Left(uri) => {
+                let uri = http::Uri::try_from(
+                    uri.to_std_string()
+                        .map_err(|_| js_error!(URIError: "URI cannot have unpaired surrogates"))?,
+                )
+                .map_err(|_| js_error!(URIError: "Invalid URI"))?;
+                http::request::Request::builder()
+                    .uri(uri)
+                    .body(())
+                    .map_err(|_| js_error!(Error: "Cannot construct request"))?
+            }
+            Either::Right(r) => r.inner,
+        };
+
+        if let Some(options) = options {
+            let (body, builder) = options.into_request_builder(Some(request))?;
+            Ok(Self {
+                inner: builder
+                    .body(())
+                    .map_err(|_| js_error!(Error: "Cannot construct request"))?,
+                body,
+            })
+        } else {
+            Ok(Self {
+                inner: request,
+                body: None,
+            })
+        }
     }
 }
 
 js_class! {
     class JsRequest as "Request" {
         constructor(
-            input: either::Either<JsString, JsRequest>,
+            input: Either<JsString, JsObject>,
             options: Option<RequestInit>
         ) {
-            JsRequest::create_from_js(input, options, )
+            let input = match input {
+                Either::Left(i) => Either::Left(i),
+                Either::Right(r) => {
+                    if let Ok(request) = r.clone().downcast::<JsRequest>() {
+                        Either::Right(request)
+                    } else {
+                        return Err(js_error!(TypeError: "invalid input argument"));
+                    }
+                }
+            };
+            JsRequest::create_from_js(input, options)
         }
     }
 }

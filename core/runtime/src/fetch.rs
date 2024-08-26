@@ -7,7 +7,7 @@
 //! [spec]: https://fetch.spec.whatwg.org/
 //! [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/fetch
 
-use boa_engine::object::builtins::JsPromise;
+use boa_engine::object::builtins::{JsFunction, JsPromise};
 use boa_engine::value::{Convert, TryFromJs};
 use boa_engine::{js_error, Context, Finalize, JsData, JsObject, JsResult, JsString, JsValue};
 use boa_gc::Trace;
@@ -170,4 +170,10 @@ js_class! {
 
 pub(crate) fn fetch<Body, T: Fetcher<Body>>(context: &mut Context) -> JsPromise {
     todo!()
+}
+
+pub fn create_fetch(fetcher: impl Fetcher<()>, context: &mut Context) -> JsResult<JsFunction> {
+    fetch.set_method("fetch", fetch(fetcher, context)?);
+
+    Ok(fetch)
 }

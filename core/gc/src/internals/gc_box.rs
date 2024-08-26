@@ -22,7 +22,7 @@ impl<T: Trace> GcBox<T> {
         }
     }
 }
-type x=  Box<>
+
 impl<T: Trace + ?Sized> GcBox<T> {
     /// Returns a reference to the `GcBox`'s value.
     pub(crate) const fn value(&self) -> &T {
@@ -81,19 +81,5 @@ impl<T: Trace + ?Sized> GcBox<T> {
 
     pub(crate) fn size(&self) -> usize {
         self.vtable.size()
-    }
-
-    /// Consumes the `Box`, returning the wrapped value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let c = Box::new(5);
-    ///
-    /// assert_eq!(Box::into_inner(c), 5);
-    /// ```
-    #[inline]
-    pub fn into_inner(boxed: Self) -> T {
-        *boxed
     }
 }

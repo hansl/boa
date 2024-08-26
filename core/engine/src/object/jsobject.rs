@@ -32,7 +32,6 @@ use std::{
     result::Result as StdResult,
 };
 use thin_vec::ThinVec;
-use yoke::cartable_ptr::CartablePointerLike;
 
 /// A wrapper type for an immutably borrowed type T.
 pub type Ref<'a, T> = boa_gc::GcRef<'a, T>;
@@ -778,14 +777,6 @@ impl<T: NativeObject + ?Sized> JsObject<T> {
     pub(crate) fn private_name(&self, description: JsString) -> PrivateName {
         let ptr: *const _ = self.as_ref();
         PrivateName::new(description, ptr.cast::<()>() as usize)
-    }
-}
-
-impl<T: NativeObject + Sized> JsObject<T> {
-    /// Returns the inner object, consuming this [`JsObject`].
-    pub fn into_inner(self) -> T {
-        let inner = self.inner.into_raw().into_inner();
-        inner.object.into_inner().data
     }
 }
 

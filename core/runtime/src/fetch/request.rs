@@ -1,34 +1,15 @@
-//! Boa's implementation of JavaScript's `fetch` function.
+//! The [`Request`] JavaScript class and adjacent types.
 //!
-//! More information:
-//!  - [MDN documentation][mdn]
-//!  - [WHATWG `fetch` specification][spec]
+//! See the [Request interface documentation][mdn] for more information.
 //!
-//! [spec]: https://fetch.spec.whatwg.org/
-//! [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/fetch
-
-use boa_engine::object::builtins::{JsFunction, JsPromise};
+//! [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/Request
+use super::HttpRequest;
 use boa_engine::value::{Convert, TryFromJs};
-use boa_engine::{js_error, Context, Finalize, JsData, JsObject, JsResult, JsString, JsValue};
-use boa_gc::Trace;
-use boa_interop::{js_class, JsClass};
+use boa_engine::{js_error, Finalize, JsData, JsObject, JsResult, JsString, JsValue, Trace};
+use boa_interop::js_class;
 use either::Either;
-use http::{Request as HttpRequest, Response as HttpResponse};
 use std::collections::BTreeMap;
-
-/// A trait for backend implementation of an HTTP fetcher.
-// TODO: consider implementing an async version of this.
-pub trait Fetcher<Body>: Trace + Sized {
-    /// Fetch an HTTP document, returning an HTTP response.
-    ///
-    /// # Errors
-    /// Any errors returned by the HTTP implementation must conform to
-    /// [`boa_engine::JsError`].
-    fn fetch_blocking(
-        request: &HttpRequest<Body>,
-        context: &mut Context,
-    ) -> JsResult<HttpResponse<Body>>;
-}
+use std::mem;
 
 /// A [RequestInit][mdn] object. This is a JavaScript object (not a
 /// class) that can be used as options for creating a [`JsRequest`].
@@ -109,6 +90,12 @@ pub struct JsRequest {
 }
 
 impl JsRequest {
+    /// Get the inner `http::Request` object. This drops the body (if any).
+    fn into_inner(mut self) -> HttpRequest<()> {
+        let inner = mem::replace(&mut self.inner, HttpRequest::new(()));
+        inner
+    }
+
     /// Create a [`JsRequest`] instance from JavaScript arguments, similar to
     /// calling its constructor in JavaScript.
     pub fn create_from_js(
@@ -127,7 +114,7 @@ impl JsRequest {
                     .body(())
                     .map_err(|_| js_error!(Error: "Cannot construct request"))?
             }
-            Either::Right(r) => r.inner,
+            Either::Right(r) => r.into_inner(),
         };
 
         if let Some(options) = options {
@@ -157,7 +144,8 @@ js_class! {
                 Either::Left(i) => Either::Left(i),
                 Either::Right(r) => {
                     if let Ok(request) = r.clone().downcast::<JsRequest>() {
-                        Either::Right(request)
+                        // TODO: why do we need to clone? We can just drop the `JsObject`.
+                        Either::Right(request.borrow().data().clone())
                     } else {
                         return Err(js_error!(TypeError: "invalid input argument"));
                     }
@@ -166,14 +154,4 @@ js_class! {
             JsRequest::create_from_js(input, options)
         }
     }
-}
-
-pub(crate) fn fetch<Body, T: Fetcher<Body>>(context: &mut Context) -> JsPromise {
-    todo!()
-}
-
-pub fn create_fetch(fetcher: impl Fetcher<()>, context: &mut Context) -> JsResult<JsFunction> {
-    fetch.set_method("fetch", fetch(fetcher, context)?);
-
-    Ok(fetch)
 }

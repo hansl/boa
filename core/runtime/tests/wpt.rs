@@ -66,7 +66,7 @@ impl Logger for RecordingLogger {
 
 // Test the console with the WPT test suite.
 #[rstest]
-fn console(#[files("../../wpt/console/*.js")] path: PathBuf) {
+fn console(#[files("../../wpt/console/*.any.js")] path: PathBuf) {
     let context = &mut Context::default();
 
     let log = Gc::new(GcRefCell::new(Vec::new()));

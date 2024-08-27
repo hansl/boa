@@ -16,7 +16,9 @@ boa_gc.workspace = true
 rustc-hash = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+boa_interop.workspace = true
 indoc.workspace = true
+rstest.workspace = true
 textwrap.workspace = true
 
 [lints]

@@ -16,7 +16,7 @@
 )]
 
 use boa_engine::property::Attribute;
-use boa_engine::{js_str, Context, Source};
+use boa_engine::{js_str, Context, JsValue, Source};
 use boa_gc::{Gc, GcRefCell};
 use clap::{Parser, ValueHint};
 use clap_verbosity_flag::Level as ClapVerbosityLevel;
@@ -181,18 +181,14 @@ fn run_tests(
 
         for (test_name, full_path) in tests {
             let test_path = full_path.strip_prefix(&wpt_path)?;
-
-            let log = Gc::new(GcRefCell::new(Vec::new()));
-            let error = Gc::new(GcRefCell::new(Vec::new()));
+            let logger = logger::RecordingLogger::new();
 
             let context = &mut Context::default();
-            boa_runtime::Console::init_with_logger(
-                context,
-                logger::RecordingLogger {
-                    log: log.clone(),
-                    error: error.clone(),
-                },
-            );
+            // let console = boa_runtime::Console::init_with_logger(context, logger.clone());
+            let console = boa_runtime::Console::init(context);
+            context
+                .register_global_property(boa_runtime::Console::NAME, console, Attribute::all())
+                .unwrap();
 
             // Define self as the globalThis.
             let global_this = context.global_object();
@@ -205,12 +201,35 @@ fn run_tests(
                 Source::from_reader(File::open(&harness_path).unwrap(), Some(&harness_path));
             context.eval(harness_source).unwrap();
 
+            // Hook our callbacks.
+            context
+                .eval(Source::from_bytes(
+                    b"add_result_callback((a,b) => console.log('result_callback: ', JSON.stringify(a), JSON.stringify(b)))",
+                ))
+                .unwrap();
+            context
+                .eval(Source::from_bytes(
+                    b"add_completion_callback((a,b) => console.log('completion_callback: ', JSON.stringify(a), JSON.stringify(b)))",
+                ))
+                .unwrap();
+
             // Execute the test.
             let source = Source::from_reader(File::open(&full_path).unwrap(), Some(&full_path));
+            info!(?source);
             info!("Result: {:?}", context.eval(source).unwrap().display());
 
-            info!("{:?}", log.borrow());
-            warn!("{:?}", error.borrow());
+            context.run_jobs();
+
+            // Done()
+            info!(
+                "Result: {:?}",
+                context
+                    .eval(Source::from_bytes(b"done()"))
+                    .unwrap()
+                    .display()
+            );
+
+            info!("{:?}", logger.all_logs());
         }
 
         report.add_test_suite(test_suite);

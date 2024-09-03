@@ -7,14 +7,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static UNIQUE: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Debug, Trace, Finalize)]
-pub struct RecordingLogEvent {
+pub(crate) struct RecordingLogEvent {
     pub index: usize,
     pub indent: usize,
     pub msg: String,
 }
 
 impl RecordingLogEvent {
-    pub fn new(msg: String, state: &Console) -> Self {
+    pub(crate) fn new(msg: String, state: &Console) -> Self {
         Self {
             index: UNIQUE.fetch_add(1, Ordering::SeqCst),
             indent: state.groups.len(),
@@ -24,37 +24,71 @@ impl RecordingLogEvent {
 }
 
 #[derive(Trace, Finalize)]
-pub struct RecordingLogger {
-    pub log: Gc<GcRefCell<Vec<RecordingLogEvent>>>,
-    pub error: Gc<GcRefCell<Vec<RecordingLogEvent>>>,
+struct RecordingLoggerInner {
+    pub log: Vec<RecordingLogEvent>,
+    pub error: Vec<RecordingLogEvent>,
+}
+
+#[derive(Clone, Trace, Finalize)]
+pub(crate) struct RecordingLogger {
+    inner: Gc<GcRefCell<RecordingLoggerInner>>,
 }
 
 impl Logger for RecordingLogger {
     fn log(&self, msg: String, state: &Console) -> JsResult<()> {
-        self.log
+        self.inner
             .borrow_mut()
+            .log
             .push(RecordingLogEvent::new(msg, state));
         Ok(())
     }
 
     fn info(&self, msg: String, state: &Console) -> JsResult<()> {
-        self.log
+        self.inner
             .borrow_mut()
+            .log
             .push(RecordingLogEvent::new(msg, state));
         Ok(())
     }
 
     fn warn(&self, msg: String, state: &Console) -> JsResult<()> {
-        self.log
+        self.inner
             .borrow_mut()
+            .log
             .push(RecordingLogEvent::new(msg, state));
         Ok(())
     }
 
     fn error(&self, msg: String, state: &Console) -> JsResult<()> {
-        self.error
+        self.inner
             .borrow_mut()
+            .error
             .push(RecordingLogEvent::new(msg, state));
         Ok(())
+    }
+}
+
+impl RecordingLogger {
+    pub(crate) fn new() -> Self {
+        Self {
+            inner: Gc::new(GcRefCell::new(RecordingLoggerInner {
+                log: Vec::new(),
+                error: Vec::new(),
+            })),
+        }
+    }
+
+    pub(crate) fn all_logs(&self) -> Vec<RecordingLogEvent> {
+        let mut all: Vec<RecordingLogEvent> = self.log().into_iter().chain(self.error()).collect();
+        all.sort_by_key(|x| x.index);
+        all
+    }
+
+    pub(crate) fn log(&self) -> Vec<RecordingLogEvent> {
+        self.inner.borrow().log.clone()
+    }
+
+    pub(crate) fn error(&self) -> Vec<RecordingLogEvent> {
+        self.inner.borrow().error.clone()
     }
 }

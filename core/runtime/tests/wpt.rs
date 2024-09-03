@@ -89,6 +89,8 @@ fn console(#[files("../../../wpt/console/*.any.js")] path: PathBuf) {
     let harness = Source::from_reader(File::open(&harness_path).unwrap(), Some(&harness_path));
     context.eval(harness).unwrap();
 
+    eprintln!("global: {:#?}", context.global_object());
+
     let source = Source::from_reader(File::open(&path).unwrap(), Some(&path));
     context.eval(source).unwrap();
 }

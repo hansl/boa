@@ -38,8 +38,6 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::BufReader;
-use std::ops::Deref;
-use std::pin::Pin;
 use std::rc::Rc;
 use std::{
     path::{Path, PathBuf},
@@ -134,6 +132,7 @@ impl TryFromJs for TestStatus {
 struct Test {
     name: JsString,
     status: TestStatus,
+    message: Option<JsString>,
 }
 
 /// A TestSuite adaptor for Boa.
@@ -169,13 +168,16 @@ fn completion_callback__(
     tests: Vec<Test>,
 ) -> JsResult<()> {
     for test in tests {
-        let status = match test.status {
+        let mut status = match test.status {
             TestStatus::Pass => TestCaseStatus::success(),
             TestStatus::Fail => TestCaseStatus::non_success(NonSuccessKind::Failure),
             TestStatus::Timeout => TestCaseStatus::non_success(NonSuccessKind::Error),
             TestStatus::NotRun => TestCaseStatus::skipped(),
             TestStatus::PreconditionFailed => TestCaseStatus::skipped(),
         };
+        if let Some(message) = test.message {
+            status.set_message(message.to_std_string_escaped());
+        }
 
         let test_case = TestCase::new(test.name.to_std_string_escaped(), status);
         report.add_test_case(test_case);
@@ -300,10 +302,8 @@ fn run_tests(
             let logger = logger::RecordingLogger::new();
 
             let context = &mut Context::default();
-            let console = boa_runtime::Console::init_with_logger(context, logger.clone());
-            context
-                .register_global_property(boa_runtime::Console::NAME, console, Attribute::all())
-                .unwrap();
+            boa_runtime::Console::register_with_logger(context, logger.clone())
+                .expect("Could not register console");
 
             context.insert_data(test_suite.clone());
 

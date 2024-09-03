@@ -14,12 +14,13 @@
 #[cfg(test)]
 mod tests;
 
+use boa_engine::property::Attribute;
 use boa_engine::{
     js_str, js_string,
     native_function::NativeFunction,
     object::{JsObject, ObjectInitializer},
     value::{JsValue, Numeric},
-    Context, JsArgs, JsData, JsError, JsResult, JsStr, JsString,
+    Context, JsArgs, JsData, JsError, JsResult, JsStr, JsString, JsSymbol,
 };
 use boa_gc::{Finalize, Trace};
 use rustc_hash::FxHashMap;
@@ -175,6 +176,21 @@ impl Console {
     /// Name of the built-in `console` property.
     pub const NAME: JsStr<'static> = js_str!("console");
 
+    /// Modify the context to include the `console` object.
+    pub fn register_with_logger<L>(context: &mut Context, logger: L) -> JsResult<()>
+    where
+        L: Logger + 'static,
+    {
+        let console = Self::init_with_logger(context, logger);
+        context.register_global_property(
+            Self::NAME,
+            console,
+            Attribute::WRITABLE | Attribute::CONFIGURABLE,
+        )?;
+
+        Ok(())
+    }
+
     /// Initializes the `console` with a special logger.
     #[allow(clippy::too_many_lines)]
     pub fn init_with_logger<L>(context: &mut Context, logger: L) -> JsObject
@@ -210,98 +226,107 @@ impl Console {
         let state = Rc::new(RefCell::new(Self::default()));
         let logger = Rc::new(logger);
 
-        ObjectInitializer::with_native_data(Self::default(), context)
-            .function(
-                console_method(Self::assert, state.clone(), logger.clone()),
-                js_string!("assert"),
-                0,
-            )
-            .function(
-                console_method_mut(Self::clear, state.clone(), logger.clone()),
-                js_string!("clear"),
-                0,
-            )
-            .function(
-                console_method(Self::debug, state.clone(), logger.clone()),
-                js_string!("debug"),
-                0,
-            )
-            .function(
-                console_method(Self::error, state.clone(), logger.clone()),
-                js_string!("error"),
-                0,
-            )
-            .function(
-                console_method(Self::info, state.clone(), logger.clone()),
-                js_string!("info"),
-                0,
-            )
-            .function(
-                console_method(Self::log, state.clone(), logger.clone()),
-                js_string!("log"),
-                0,
-            )
-            .function(
-                console_method(Self::trace, state.clone(), logger.clone()),
-                js_string!("trace"),
-                0,
-            )
-            .function(
-                console_method(Self::warn, state.clone(), logger.clone()),
-                js_string!("warn"),
-                0,
-            )
-            .function(
-                console_method_mut(Self::count, state.clone(), logger.clone()),
-                js_string!("count"),
-                0,
-            )
-            .function(
-                console_method_mut(Self::count_reset, state.clone(), logger.clone()),
-                js_string!("countReset"),
-                0,
-            )
-            .function(
-                console_method_mut(Self::group, state.clone(), logger.clone()),
-                js_string!("group"),
-                0,
-            )
-            .function(
-                console_method_mut(Self::group_collapsed, state.clone(), logger.clone()),
-                js_string!("groupCollapsed"),
-                0,
-            )
-            .function(
-                console_method_mut(Self::group_end, state.clone(), logger.clone()),
-                js_string!("groupEnd"),
-                0,
-            )
-            .function(
-                console_method_mut(Self::time, state.clone(), logger.clone()),
-                js_string!("time"),
-                0,
-            )
-            .function(
-                console_method(Self::time_log, state.clone(), logger.clone()),
-                js_string!("timeLog"),
-                0,
-            )
-            .function(
-                console_method_mut(Self::time_end, state.clone(), logger.clone()),
-                js_string!("timeEnd"),
-                0,
-            )
-            .function(
-                console_method(Self::dir, state.clone(), logger.clone()),
-                js_string!("dir"),
-                0,
-            )
-            .function(
-                console_method(Self::dir, state, logger.clone()),
-                js_string!("dirxml"),
-                0,
-            )
-            .build()
+        ObjectInitializer::with_native_data_and_proto(
+            Self::default(),
+            JsObject::with_object_proto(context.realm().intrinsics()),
+            context,
+        )
+        .property(
+            JsSymbol::to_string_tag(),
+            Self::NAME,
+            Attribute::CONFIGURABLE,
+        )
+        .function(
+            console_method(Self::assert, state.clone(), logger.clone()),
+            js_string!("assert"),
+            0,
+        )
+        .function(
+            console_method_mut(Self::clear, state.clone(), logger.clone()),
+            js_string!("clear"),
+            0,
+        )
+        .function(
+            console_method(Self::debug, state.clone(), logger.clone()),
+            js_string!("debug"),
+            0,
+        )
+        .function(
+            console_method(Self::error, state.clone(), logger.clone()),
+            js_string!("error"),
+            0,
+        )
+        .function(
+            console_method(Self::info, state.clone(), logger.clone()),
+            js_string!("info"),
+            0,
+        )
+        .function(
+            console_method(Self::log, state.clone(), logger.clone()),
+            js_string!("log"),
+            0,
+        )
+        .function(
+            console_method(Self::trace, state.clone(), logger.clone()),
+            js_string!("trace"),
+            0,
+        )
+        .function(
+            console_method(Self::warn, state.clone(), logger.clone()),
+            js_string!("warn"),
+            0,
+        )
+        .function(
+            console_method_mut(Self::count, state.clone(), logger.clone()),
+            js_string!("count"),
+            0,
+        )
+        .function(
+            console_method_mut(Self::count_reset, state.clone(), logger.clone()),
+            js_string!("countReset"),
+            0,
+        )
+        .function(
+            console_method_mut(Self::group, state.clone(), logger.clone()),
+            js_string!("group"),
+            0,
+        )
+        .function(
+            console_method_mut(Self::group_collapsed, state.clone(), logger.clone()),
+            js_string!("groupCollapsed"),
+            0,
+        )
+        .function(
+            console_method_mut(Self::group_end, state.clone(), logger.clone()),
+            js_string!("groupEnd"),
+            0,
+        )
+        .function(
+            console_method_mut(Self::time, state.clone(), logger.clone()),
+            js_string!("time"),
+            0,
+        )
+        .function(
+            console_method(Self::time_log, state.clone(), logger.clone()),
+            js_string!("timeLog"),
+            0,
+        )
+        .function(
+            console_method_mut(Self::time_end, state.clone(), logger.clone()),
+            js_string!("timeEnd"),
+            0,
+        )
+        .function(
+            console_method(Self::dir, state.clone(), logger.clone()),
+            js_string!("dir"),
+            0,
+        )
+        .function(
+            console_method(Self::dir, state, logger.clone()),
+            js_string!("dirxml"),
+            0,
+        )
+        .build()
     }
 
     /// Initializes the `console` built-in object.

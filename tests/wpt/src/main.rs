@@ -15,9 +15,13 @@
     clippy::print_stdout
 )]
 
+use boa_engine::parser::source::UTF8Input;
 use boa_engine::property::Attribute;
-use boa_engine::{js_str, Context, JsValue, Source};
-use boa_gc::{Gc, GcRefCell};
+use boa_engine::value::TryFromJs;
+use boa_engine::{
+    js_error, js_str, Context, Finalize, JsData, JsResult, JsString, JsValue, Source, Trace,
+};
+use boa_interop::{ContextData, IntoJsFunctionCopied};
 use clap::{Parser, ValueHint};
 use clap_verbosity_flag::Level as ClapVerbosityLevel;
 use clap_verbosity_flag::Verbosity;
@@ -26,17 +30,23 @@ use color_eyre::{
     Result,
 };
 use fast_glob::glob_match;
-use quick_junit::{Report, TestSuite};
+use quick_junit::{NonSuccessKind, Report, TestCase, TestCaseStatus, TestSuite};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::File;
+use std::io::BufReader;
+use std::ops::Deref;
+use std::pin::Pin;
+use std::rc::Rc;
 use std::{
     path::{Path, PathBuf},
     sync::OnceLock,
     time::Instant,
 };
-use tracing::{debug, info, warn, Level};
+use tracing::{info, Level};
 use tracing_subscriber::fmt::Subscriber;
 use walkdir::WalkDir;
 
@@ -47,10 +57,6 @@ static START: OnceLock<Instant> = OnceLock::new();
 /// Structure that contains the configuration of the tester.
 #[derive(Debug, Deserialize)]
 struct Config {
-    /// The `WPT` repository commit.
-    #[serde(default)]
-    pub(crate) commit: String,
-
     /// The list of tests to run (by default). This is a GLOB and can contain wildcards.
     #[serde(default)]
     pub(crate) included: FxHashSet<String>,
@@ -58,12 +64,6 @@ struct Config {
     /// The list of tests to skip. This is a GLOB and can contain wildcards.
     #[serde(default)]
     pub(crate) excluded: FxHashSet<String>,
-}
-
-impl Config {
-    pub(crate) fn commit(&self) -> &str {
-        &self.commit
-    }
 }
 
 /// Boa WPT tester
@@ -101,10 +101,127 @@ enum SubCommand {
         #[arg(long, value_hint = ValueHint::AnyPath)]
         exclude: Option<Vec<String>>,
 
-        /// Optional output folder for the full results information.
+        /// Optional output folder for the full result information.
         #[arg(short, long, value_hint = ValueHint::DirPath)]
         output: Option<PathBuf>,
     },
+}
+
+/// The test status from WPT. This is defined in the test harness.
+enum TestStatus {
+    Pass = 0,
+    Fail = 1,
+    Timeout = 2,
+    NotRun = 3,
+    PreconditionFailed = 4,
+}
+
+impl TryFromJs for TestStatus {
+    fn try_from_js(value: &JsValue, context: &mut Context) -> JsResult<Self> {
+        match value.to_u32(context) {
+            Ok(0) => Ok(Self::Pass),
+            Ok(1) => Ok(Self::Fail),
+            Ok(2) => Ok(Self::Timeout),
+            Ok(3) => Ok(Self::NotRun),
+            Ok(4) => Ok(Self::PreconditionFailed),
+            _ => Err(js_error!("Invalid test status")),
+        }
+    }
+}
+
+/// A single test serialization.
+#[derive(TryFromJs)]
+struct Test {
+    name: JsString,
+    status: TestStatus,
+}
+
+/// A TestSuite adaptor for Boa.
+#[derive(Clone, Trace, Finalize, JsData)]
+struct TestSuiteAdaptor {
+    #[unsafe_ignore_trace]
+    inner: Rc<RefCell<TestSuite>>,
+}
+
+impl TestSuiteAdaptor {
+    /// Create a new test suite.
+    fn new(name: &str) -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(TestSuite::new(name))),
+        }
+    }
+
+    /// Add a test case to the suite.
+    fn add_test_case(&self, test_case: TestCase) {
+        self.inner.borrow_mut().add_test_case(test_case);
+    }
+
+    /// Consume the test suite and return the inner test suite.
+    fn into_inner(mut self) -> TestSuite {
+        let inner = std::mem::replace(&mut self.inner, Rc::new(RefCell::new(TestSuite::new(""))));
+        Rc::into_inner(inner).unwrap().into_inner()
+    }
+}
+
+/// The completion callback for the WPT test.
+fn completion_callback__(
+    ContextData(report): ContextData<TestSuiteAdaptor>,
+    tests: Vec<Test>,
+) -> JsResult<()> {
+    for test in tests {
+        let status = match test.status {
+            TestStatus::Pass => TestCaseStatus::success(),
+            TestStatus::Fail => TestCaseStatus::non_success(NonSuccessKind::Failure),
+            TestStatus::Timeout => TestCaseStatus::non_success(NonSuccessKind::Error),
+            TestStatus::NotRun => TestCaseStatus::skipped(),
+            TestStatus::PreconditionFailed => TestCaseStatus::skipped(),
+        };
+
+        let test_case = TestCase::new(test.name.to_std_string_escaped(), status);
+        report.add_test_case(test_case);
+    }
+    Ok(())
+}
+
+/// A Test suite source code.
+struct TestSuiteSource {
+    name: String,
+    path: PathBuf,
+}
+
+impl TestSuiteSource {
+    /// Create a new test suite source.
+    fn new(name: impl Into<String>, source: impl AsRef<Path>) -> Self {
+        Self {
+            name: name.into(),
+            path: source.as_ref().to_path_buf(),
+        }
+    }
+
+    fn source(&self) -> Result<Source<'_, UTF8Input<BufReader<File>>>> {
+        Ok(Source::from_filepath(&self.path)?)
+    }
+
+    fn meta(&self) -> Result<BTreeMap<String, Vec<String>>> {
+        let mut meta: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+        // Read the whole file and extract the metadata.
+        let content = std::fs::read_to_string(&self.path)?;
+        for line in content.lines() {
+            if let Some(kv) = line.strip_prefix("// META:") {
+                let kv = kv.trim();
+                if let Some((key, value)) = kv.split_once("=") {
+                    meta.entry(key.to_string())
+                        .or_default()
+                        .push(value.to_string());
+                }
+            } else if !line.starts_with("//") && !line.is_empty() {
+                break;
+            }
+        }
+
+        Ok(meta)
+    }
 }
 
 /// Program entry point.
@@ -177,20 +294,20 @@ fn run_tests(
 
     for (suite_name, tests) in all_tests {
         info!(?suite_name, count = tests.len(), "Running test...");
-        let test_suite = TestSuite::new(&suite_name);
+        let test_suite = TestSuiteAdaptor::new(&suite_name);
 
         for (test_name, full_path) in tests {
-            let test_path = full_path.strip_prefix(&wpt_path)?;
             let logger = logger::RecordingLogger::new();
 
             let context = &mut Context::default();
-            // let console = boa_runtime::Console::init_with_logger(context, logger.clone());
-            let console = boa_runtime::Console::init(context);
+            let console = boa_runtime::Console::init_with_logger(context, logger.clone());
             context
                 .register_global_property(boa_runtime::Console::NAME, console, Attribute::all())
                 .unwrap();
 
-            // Define self as the globalThis.
+            context.insert_data(test_suite.clone());
+
+            // Define `self` as the globalThis.
             let global_this = context.global_object();
             context
                 .register_global_property(js_str!("self"), global_this, Attribute::all())
@@ -202,22 +319,32 @@ fn run_tests(
             context.eval(harness_source).unwrap();
 
             // Hook our callbacks.
+            let function = completion_callback__
+                .into_js_function_copied(context)
+                .to_js_function(context.realm());
             context
-                .eval(Source::from_bytes(
-                    b"add_result_callback((a,b) => console.log('result_callback: ', JSON.stringify(a), JSON.stringify(b)))",
-                ))
+                .register_global_property(
+                    js_str!("completion_callback__"),
+                    function,
+                    Attribute::all(),
+                )
                 .unwrap();
             context
                 .eval(Source::from_bytes(
-                    b"add_completion_callback((a,b) => console.log('completion_callback: ', JSON.stringify(a), JSON.stringify(b)))",
+                    b"add_completion_callback(completion_callback__);",
                 ))
                 .unwrap();
 
-            // Execute the test.
-            let source = Source::from_reader(File::open(&full_path).unwrap(), Some(&full_path));
-            info!(?source);
-            info!("Result: {:?}", context.eval(source).unwrap().display());
+            // Load the test.
+            let source = TestSuiteSource::new(test_name, &full_path);
+            const EMPTY: Vec<String> = vec![];
+            for script in source.meta()?.get("script").unwrap_or(&EMPTY) {
+                let path = wpt_path.join(script.trim_start_matches('/'));
+                let source = Source::from_filepath(&path)?;
+                context.eval(source).expect("Could not load script");
+            }
 
+            context.eval(source.source()?).expect("Could not eval test");
             context.run_jobs();
 
             // Done()
@@ -228,11 +355,9 @@ fn run_tests(
                     .unwrap()
                     .display()
             );
-
-            info!("{:?}", logger.all_logs());
         }
 
-        report.add_test_suite(test_suite);
+        report.add_test_suite(test_suite.into_inner());
     }
 
     // Write the report to the output or the STDOUT.

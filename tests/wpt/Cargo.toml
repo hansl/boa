@@ -14,17 +14,16 @@ rust-version.workspace = true
 [dependencies]
 boa_engine.workspace = true
 boa_gc.workspace = true
+boa_interop.workspace = true
 boa_runtime.workspace = true
 clap = { workspace = true, features = ["derive"] }
 clap-verbosity-flag = "2.2.1"
 color-eyre.workspace = true
-colored.workspace = true
 fast-glob = "0.4.0"
 quick-junit = "0.4.0"
+regex.workspace = true
 rustc-hash = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
-serde_repr.workspace = true
 time.workspace = true
 toml.workspace = true
 tracing = "0.1.40"

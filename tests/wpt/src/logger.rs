@@ -77,18 +77,4 @@ impl RecordingLogger {
             })),
         }
     }
-
-    pub(crate) fn all_logs(&self) -> Vec<RecordingLogEvent> {
-        let mut all: Vec<RecordingLogEvent> = self.log().into_iter().chain(self.error()).collect();
-        all.sort_by_key(|x| x.index);
-        all
-    }
-
-    pub(crate) fn log(&self) -> Vec<RecordingLogEvent> {
-        self.inner.borrow().log.clone()
-    }
-
-    pub(crate) fn error(&self) -> Vec<RecordingLogEvent> {
-        self.inner.borrow().error.clone()
-    }
 }

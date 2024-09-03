@@ -1,4 +1,4 @@
-use boa_engine::{Finalize, JsResult, Trace};
+use boa_engine::{Finalize, JsData, JsResult, Trace};
 use boa_gc::{Gc, GcRefCell};
 use boa_runtime::{Console, Logger};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// A unique index of all logs.
 static UNIQUE: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Clone, Debug, Trace, Finalize)]
+#[derive(Clone, Debug, Trace, Finalize, JsData)]
 pub(crate) struct RecordingLogEvent {
     pub index: usize,
     pub indent: usize,
@@ -23,13 +23,13 @@ impl RecordingLogEvent {
     }
 }
 
-#[derive(Trace, Finalize)]
+#[derive(Trace, Finalize, JsData)]
 struct RecordingLoggerInner {
     pub log: Vec<RecordingLogEvent>,
     pub error: Vec<RecordingLogEvent>,
 }
 
-#[derive(Clone, Trace, Finalize)]
+#[derive(Clone, Trace, Finalize, JsData)]
 pub(crate) struct RecordingLogger {
     inner: Gc<GcRefCell<RecordingLoggerInner>>,
 }
@@ -90,5 +90,10 @@ impl RecordingLogger {
 
     pub(crate) fn error(&self) -> Vec<RecordingLogEvent> {
         self.inner.borrow().error.clone()
+    }
+
+    pub(crate) fn clear(&self) {
+        self.inner.borrow_mut().log.clear();
+        self.inner.borrow_mut().error.clear();
     }
 }

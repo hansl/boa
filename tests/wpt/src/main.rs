@@ -15,11 +15,13 @@
     clippy::print_stdout
 )]
 
+use crate::logger::RecordingLogger;
 use boa_engine::parser::source::UTF8Input;
 use boa_engine::property::Attribute;
 use boa_engine::value::TryFromJs;
 use boa_engine::{
-    js_error, js_str, Context, Finalize, JsData, JsResult, JsString, JsValue, Source, Trace,
+    js_error, js_str, js_string, Context, Finalize, JsData, JsResult, JsString, JsValue, Source,
+    Trace,
 };
 use boa_interop::{ContextData, IntoJsFunctionCopied};
 use clap::{Parser, ValueHint};
@@ -44,7 +46,7 @@ use std::{
     sync::OnceLock,
     time::Instant,
 };
-use tracing::{info, Level};
+use tracing::{error, info, Level};
 use tracing_subscriber::fmt::Subscriber;
 use walkdir::WalkDir;
 
@@ -133,6 +135,7 @@ struct Test {
     name: JsString,
     status: TestStatus,
     message: Option<JsString>,
+    properties: BTreeMap<JsString, JsValue>,
 }
 
 /// A TestSuite adaptor for Boa.
@@ -162,40 +165,77 @@ impl TestSuiteAdaptor {
     }
 }
 
-/// The completion callback for the WPT test.
-fn completion_callback__(
+/// The result callback for the WPT test.
+fn result_callback__(
     ContextData(report): ContextData<TestSuiteAdaptor>,
-    tests: Vec<Test>,
+    ContextData(logger): ContextData<RecordingLogger>,
+    test: Test,
+    context: &mut Context,
 ) -> JsResult<()> {
-    for test in tests {
-        let mut status = match test.status {
-            TestStatus::Pass => TestCaseStatus::success(),
-            TestStatus::Fail => TestCaseStatus::non_success(NonSuccessKind::Failure),
-            TestStatus::Timeout => TestCaseStatus::non_success(NonSuccessKind::Error),
-            TestStatus::NotRun => TestCaseStatus::skipped(),
-            TestStatus::PreconditionFailed => TestCaseStatus::skipped(),
-        };
-        if let Some(message) = test.message {
-            status.set_message(message.to_std_string_escaped());
+    let mut status = match test.status {
+        TestStatus::Pass => TestCaseStatus::success(),
+        TestStatus::Fail => TestCaseStatus::non_success(NonSuccessKind::Failure),
+        TestStatus::Timeout => TestCaseStatus::non_success(NonSuccessKind::Error),
+        TestStatus::NotRun => TestCaseStatus::skipped(),
+        TestStatus::PreconditionFailed => TestCaseStatus::skipped(),
+    };
+    if let Some(message) = test.message {
+        status.set_message(message.to_std_string_escaped());
+    }
+
+    // Check the logs if the test succeeded.
+    if matches!(status, TestCaseStatus::Success { .. }) {
+        let logs = logger.all_logs();
+        let mut pass = true;
+        let mut failed_reason = None;
+
+        if let Some(log_regex) = test.properties.get(&js_string!("logs")) {
+            if let Ok(logs_re) = log_regex.try_js_into::<Vec<JsValue>>(context) {
+                for re in logs_re {
+                    if let Some(re) = re.as_regexp() {
+                        if !logs.iter().any(|log| {
+                            let s = JsString::from(log.msg.clone());
+                            re.test(s, context).unwrap_or(false)
+                        }) {
+                            pass = false;
+                            failed_reason = Some(re.to_string(context)?);
+                            break;
+                        }
+                    } else {
+                        let re_str = re.to_string(context)?.to_std_string_escaped();
+                        if !logs.iter().any(|log| log.msg.contains(&re_str)) {
+                            pass = false;
+                            failed_reason = Some(re_str);
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
-        let test_case = TestCase::new(test.name.to_std_string_escaped(), status);
-        report.add_test_case(test_case);
+        if !pass {
+            status = TestCaseStatus::non_success(NonSuccessKind::Failure);
+            if let Some(m) = failed_reason {
+                status.set_message(format!("regex could not be found in logs: {m:?}"));
+            }
+        }
     }
+
+    let test_case = TestCase::new(test.name.to_std_string_escaped(), status);
+    report.add_test_case(test_case);
+    logger.clear();
     Ok(())
 }
 
 /// A Test suite source code.
 struct TestSuiteSource {
-    name: String,
     path: PathBuf,
 }
 
 impl TestSuiteSource {
     /// Create a new test suite source.
-    fn new(name: impl Into<String>, source: impl AsRef<Path>) -> Self {
+    fn new(_name: impl Into<String>, source: impl AsRef<Path>) -> Self {
         Self {
-            name: name.into(),
             path: source.as_ref().to_path_buf(),
         }
     }
@@ -295,16 +335,20 @@ fn run_tests(
     let mut report = Report::new("boa-wpt");
 
     for (suite_name, tests) in all_tests {
-        info!(?suite_name, count = tests.len(), "Running test...");
+        info!(?suite_name, count = tests.len(), "Running suite...");
         let test_suite = TestSuiteAdaptor::new(&suite_name);
 
         for (test_name, full_path) in tests {
-            let logger = logger::RecordingLogger::new();
+            let path = full_path.strip_prefix(&wpt_path)?;
+            info!(?test_name, ?path, "Test");
+
+            let logger = RecordingLogger::new();
 
             let context = &mut Context::default();
             boa_runtime::Console::register_with_logger(context, logger.clone())
                 .expect("Could not register console");
 
+            context.insert_data(logger.clone());
             context.insert_data(test_suite.clone());
 
             // Define `self` as the globalThis.
@@ -319,19 +363,15 @@ fn run_tests(
             context.eval(harness_source).unwrap();
 
             // Hook our callbacks.
-            let function = completion_callback__
+            let function = result_callback__
                 .into_js_function_copied(context)
                 .to_js_function(context.realm());
             context
-                .register_global_property(
-                    js_str!("completion_callback__"),
-                    function,
-                    Attribute::all(),
-                )
+                .register_global_property(js_str!("result_callback__"), function, Attribute::all())
                 .unwrap();
             context
                 .eval(Source::from_bytes(
-                    b"add_completion_callback(completion_callback__);",
+                    b"add_result_callback(result_callback__);",
                 ))
                 .unwrap();
 
@@ -348,13 +388,9 @@ fn run_tests(
             context.run_jobs();
 
             // Done()
-            info!(
-                "Result: {:?}",
-                context
-                    .eval(Source::from_bytes(b"done()"))
-                    .unwrap()
-                    .display()
-            );
+            context
+                .eval(Source::from_bytes(b"done()"))
+                .expect("Done unexpectedly threw an error.");
         }
 
         report.add_test_suite(test_suite.into_inner());
@@ -454,8 +490,7 @@ fn get_all_tests(
             if all_files.is_empty() {
                 bail!("no test files found in suite: `{suite}`");
             }
-            eprintln!("all_files: {:?}", all_files);
-            eprintln!("exclude: {:?}", exclude);
+
             for file in all_files {
                 let (suite_name, test_name) = suite_and_test_name_from_path(wpt_path, &file)?;
                 all_tests

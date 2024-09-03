@@ -87,9 +87,19 @@ impl Logger for DefaultLogger {
 
 /// This represents the `console` formatter.
 fn formatter(data: &[JsValue], context: &mut Context) -> JsResult<String> {
+    fn to_string(value: &JsValue, context: &mut Context) -> JsResult<String> {
+        // There is a slight difference between the standard [`JsValue::to_string`] and
+        // the way Console actually logs, w.r.t Symbols.
+        if let Some(s) = value.as_symbol() {
+            Ok(s.to_string())
+        } else {
+            Ok(value.to_string(context)?.to_std_string_escaped())
+        }
+    }
+
     match data {
         [] => Ok(String::new()),
-        [val] => Ok(val.to_string(context)?.to_std_string_escaped()),
+        [val] => to_string(val, context),
         data => {
             let mut formatted = String::new();
             let mut arg_index = 1;
@@ -125,11 +135,27 @@ fn formatter(data: &[JsValue], context: &mut Context) -> JsResult<String> {
                         }
                         /* string */
                         's' => {
-                            let arg = data
-                                .get_or_undefined(arg_index)
-                                .to_string(context)?
-                                .to_std_string_escaped();
-                            formatted.push_str(&arg);
+                            let arg = data.get_or_undefined(arg_index);
+
+                            // If a JS value implements `toString()`, call it.
+                            let mut written = false;
+                            if let Some(obj) = arg.as_object() {
+                                if let Ok(to_string) = obj.get(js_str!("toString"), context) {
+                                    if let Some(to_string_fn) = to_string.as_function() {
+                                        let arg = to_string_fn
+                                            .call(arg, &[], context)?
+                                            .to_string(context)?;
+                                        formatted.push_str(&arg.to_std_string_escaped());
+                                        written = true;
+                                    }
+                                }
+                            }
+
+                            if !written {
+                                let arg = arg.to_string(context)?.to_std_string_escaped();
+                                formatted.push_str(&arg);
+                            }
+
                             arg_index += 1;
                         }
                         '%' => formatted.push('%'),
@@ -146,10 +172,8 @@ fn formatter(data: &[JsValue], context: &mut Context) -> JsResult<String> {
 
             /* unformatted data */
             for rest in data.iter().skip(arg_index) {
-                formatted.push_str(&format!(
-                    " {}",
-                    rest.to_string(context)?.to_std_string_escaped()
-                ));
+                formatted.push(' ');
+                formatted.push_str(&to_string(rest, context)?);
             }
 
             Ok(formatted)

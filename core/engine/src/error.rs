@@ -14,8 +14,8 @@ use std::{error, fmt};
 use thiserror::Error;
 
 /// Create an error object from a value or string literal. Optionally the
-/// first argument of the macro can be a type of error (such as TypeError,
-/// RangeError or InternalError).
+/// first argument of the macro can be a type of error (such as `TypeError`,
+/// `RangeError` or `InternalError`).
 ///
 /// Can be used with an expression that converts into `JsValue` or a format
 /// string with arguments.
@@ -23,8 +23,8 @@ use thiserror::Error;
 /// # Native Errors
 ///
 /// The only native error that is not buildable using this macro is
-/// [`crate::JsNativeErrorKind::AggregateError`], which requires multiple
-/// error objects available at construction.
+/// `AggregateError`, which requires multiple error objects available at
+/// construction.
 ///
 /// [`InternalError`][mdn] is non-standard and unsupported in Boa.
 ///

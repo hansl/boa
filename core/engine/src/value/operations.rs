@@ -477,10 +477,9 @@ impl JsValue {
             ),
             Self::String(ref str) => Self::new(-str.to_number()),
             Self::Rational(num) => Self::new(-num),
-            Self::Integer(0) => Self::new(-f64::from(0)),
+            Self::Integer(0) | Self::Boolean(false) | Self::Null => Self::new(-f64::from(0)),
             Self::Integer(num) => Self::new(-num),
-            Self::Boolean(true) => Self::new(1),
-            Self::Boolean(false) | Self::Null => Self::new(0),
+            Self::Boolean(true) => Self::new(-f64::from(1)),
             Self::BigInt(ref x) => Self::new(JsBigInt::neg(x)),
         })
     }
@@ -537,11 +536,9 @@ impl JsValue {
 
                 match (px, py) {
                     (Self::String(ref x), Self::String(ref y)) => (x < y).into(),
-                    (Self::BigInt(ref x), Self::String(ref y)) => y
-                        .to_big_int()
+                    (Self::BigInt(ref x), Self::String(ref y)) => JsBigInt::from_js_string(y)
                         .map_or(AbstractRelation::Undefined, |y| (*x < y).into()),
-                    (Self::String(ref x), Self::BigInt(ref y)) => x
-                        .to_big_int()
+                    (Self::String(ref x), Self::BigInt(ref y)) => JsBigInt::from_js_string(x)
                         .map_or(AbstractRelation::Undefined, |x| (x < *y).into()),
                     (px, py) => match (px.to_numeric(context)?, py.to_numeric(context)?) {
                         (Numeric::Number(x), Numeric::Number(y)) => Number::less_than(x, y),

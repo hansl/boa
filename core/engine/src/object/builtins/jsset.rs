@@ -4,9 +4,9 @@ use std::ops::Deref;
 use boa_gc::{Finalize, Trace};
 
 use crate::{
-    builtins::{set::ordered_set::OrderedSet, Set},
+    builtins::{iterable::IteratorHint, set::ordered_set::OrderedSet, Set},
     error::JsNativeError,
-    object::{JsFunction, JsObject, JsObjectType, JsSetIterator},
+    object::{JsFunction, JsObject, JsSetIterator},
     value::TryFromJs,
     Context, JsResult, JsValue,
 };
@@ -104,7 +104,7 @@ impl JsSet {
     #[inline]
     pub fn values(&self, context: &mut Context) -> JsResult<JsSetIterator> {
         let iterator_object = Set::values(&self.inner.clone().into(), &[JsValue::Null], context)?
-            .get_iterator(context, None, None)?;
+            .get_iterator(IteratorHint::Sync, context)?;
 
         JsSetIterator::from_object(iterator_object.iterator().clone())
     }
@@ -117,7 +117,7 @@ impl JsSet {
     #[inline]
     pub fn keys(&self, context: &mut Context) -> JsResult<JsSetIterator> {
         let iterator_object = Set::values(&self.inner.clone().into(), &[JsValue::Null], context)?
-            .get_iterator(context, None, None)?;
+            .get_iterator(IteratorHint::Sync, context)?;
 
         JsSetIterator::from_object(iterator_object.iterator().clone())
     }
@@ -184,8 +184,6 @@ impl Deref for JsSet {
         &self.inner
     }
 }
-
-impl JsObjectType for JsSet {}
 
 impl TryFromJs for JsSet {
     fn try_from_js(value: &JsValue, _context: &mut Context) -> JsResult<Self> {

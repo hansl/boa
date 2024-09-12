@@ -10,7 +10,7 @@
 //! #    property::Attribute,
 //! #    class::{Class, ClassBuilder},
 //! #    Context, JsResult, JsValue,
-//! #    JsArgs, Source, JsObject, js_string,
+//! #    JsArgs, Source, JsObject, js_str, js_string,
 //! #    JsNativeError, JsData,
 //! # };
 //! # use boa_gc::{Finalize, Trace};
@@ -56,7 +56,7 @@
 //!         let age = args.get_or_undefined(1).to_number(context)?;
 //!
 //!         // Roughly equivalent to `this.age = Number(age)`.
-//!         instance.set(js_string!("age"), age, true, context)?;
+//!         instance.set(js_str!("age"), age, true, context)?;
 //!
 //!         Ok(())
 //!     }
@@ -70,9 +70,9 @@
 //!                 if let Some(object) = this.as_object() {
 //!                     if let Some(animal) = object.downcast_ref::<Animal>() {
 //!                         return Ok(match &*animal {
-//!                             Self::Cat => js_string!("meow"),
-//!                             Self::Dog => js_string!("woof"),
-//!                             Self::Other => js_string!(r"¯\_(ツ)_/¯"),
+//!                             Self::Cat => js_str!("meow"),
+//!                             Self::Dog => js_str!("woof"),
+//!                             Self::Other => js_str!(r"¯\_(ツ)_/¯"),
 //!                         }.into());
 //!                     }
 //!                 }
@@ -96,7 +96,7 @@
 //!
 //!     assert_eq!(
 //!         result.as_string().unwrap(),
-//!         &js_string!("My pet is 3 years old. Right, buddy? - woof!")
+//!         &js_str!("My pet is 3 years old. Right, buddy? - woof!")
 //!     );
 //! }
 //! ```
@@ -154,7 +154,7 @@ pub trait Class: NativeObject + Sized {
     ///
     /// - Throws an error if `new_target` is undefined.
     /// - Throws an error if this class is not registered in `new_target`'s realm.
-    /// See [`Context::register_global_class`].
+    ///   See [`Context::register_global_class`].
     ///
     /// <div class="warning">
     /// Overriding this method could be useful for certain usages, but incorrectly implementing this
@@ -211,7 +211,7 @@ pub trait Class: NativeObject + Sized {
     ///
     /// # Errors
     /// - Throws an error if this class is not registered in the context's realm. See
-    /// [`Context::register_global_class`].
+    ///   [`Context::register_global_class`].
     ///
     /// <div class="warning">
     /// Overriding this method could be useful for certain usages, but incorrectly implementing this

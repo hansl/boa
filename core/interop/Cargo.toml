@@ -9,10 +9,12 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+publish = false
 
 [dependencies]
 boa_engine.workspace = true
 boa_gc.workspace = true
+boa_macros.workspace = true
 rustc-hash = { workspace = true, features = ["std"] }
 
 [lints]

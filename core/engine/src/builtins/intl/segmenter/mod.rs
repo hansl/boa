@@ -1,25 +1,27 @@
 use std::ops::Range;
 
 use boa_gc::{Finalize, Trace};
-use boa_macros::utf16;
+use boa_macros::js_str;
 use boa_profiler::Profiler;
+use icu_collator::provider::CollationDiacriticsV1Marker;
 use icu_locid::Locale;
-use icu_segmenter::{
-    provider::WordBreakDataV1Marker, GraphemeClusterSegmenter, SentenceSegmenter, WordSegmenter,
-};
+use icu_segmenter::{GraphemeClusterSegmenter, SentenceSegmenter, WordSegmenter};
 
 use crate::{
     builtins::{
         options::{get_option, get_options_object},
         BuiltInBuilder, BuiltInConstructor, BuiltInObject, IntrinsicObject,
     },
-    context::intrinsics::{Intrinsics, StandardConstructor, StandardConstructors},
+    context::{
+        icu::ErasedProvider,
+        intrinsics::{Intrinsics, StandardConstructor, StandardConstructors},
+    },
     js_string,
     object::{internal_methods::get_prototype_from_constructor, JsObject, ObjectInitializer},
     property::Attribute,
     realm::Realm,
-    string::common::StaticJsStrings,
-    Context, JsArgs, JsData, JsNativeError, JsResult, JsString, JsSymbol, JsValue,
+    string::StaticJsStrings,
+    Context, JsArgs, JsData, JsNativeError, JsResult, JsStr, JsString, JsSymbol, JsValue,
 };
 
 mod iterator;
@@ -30,7 +32,7 @@ pub(crate) use options::*;
 pub(crate) use segments::*;
 
 use super::{
-    locale::{canonicalize_locale_list, resolve_locale, supported_locales},
+    locale::{canonicalize_locale_list, filter_locales, resolve_locale},
     options::IntlOptions,
     Service,
 };
@@ -62,17 +64,26 @@ impl NativeSegmenter {
 
     /// Segment the passed string, returning an iterator with the index boundaries
     /// of the segments.
-    pub(crate) fn segment<'l, 's>(&'l self, input: &'s [u16]) -> NativeSegmentIterator<'l, 's> {
-        match self {
-            Self::Grapheme(g) => NativeSegmentIterator::Grapheme(g.segment_utf16(input)),
-            Self::Word(w) => NativeSegmentIterator::Word(w.segment_utf16(input)),
-            Self::Sentence(s) => NativeSegmentIterator::Sentence(s.segment_utf16(input)),
+    pub(crate) fn segment<'l, 's>(&'l self, input: JsStr<'s>) -> NativeSegmentIterator<'l, 's> {
+        match input.variant() {
+            crate::string::JsStrVariant::Latin1(input) => match self {
+                Self::Grapheme(g) => NativeSegmentIterator::GraphemeLatin1(g.segment_latin1(input)),
+                Self::Word(w) => NativeSegmentIterator::WordLatin1(w.segment_latin1(input)),
+                Self::Sentence(s) => NativeSegmentIterator::SentenceLatin1(s.segment_latin1(input)),
+            },
+            crate::string::JsStrVariant::Utf16(input) => match self {
+                Self::Grapheme(g) => NativeSegmentIterator::GraphemeUtf16(g.segment_utf16(input)),
+                Self::Word(w) => NativeSegmentIterator::WordUtf16(w.segment_utf16(input)),
+                Self::Sentence(s) => NativeSegmentIterator::SentenceUtf16(s.segment_utf16(input)),
+            },
         }
     }
 }
 
 impl Service for Segmenter {
-    type LangMarker = WordBreakDataV1Marker;
+    // TODO: Track https://github.com/unicode-org/icu4x/issues/3284
+    // and replace when segmenters are locale-aware.
+    type LangMarker = CollationDiacriticsV1Marker;
 
     type LocaleOptions = ();
 }
@@ -127,43 +138,58 @@ impl BuiltInConstructor for Segmenter {
         let options = args.get_or_undefined(1);
 
         // 4. Let requestedLocales be ? CanonicalizeLocaleList(locales).
-        let locales = canonicalize_locale_list(locales, context)?;
+        let requested_locales = canonicalize_locale_list(locales, context)?;
 
         // 5. Set options to ? GetOptionsObject(options).
         let options = get_options_object(options)?;
 
         // 6. Let opt be a new Record.
         // 7. Let matcher be ? GetOption(options, "localeMatcher", string, « "lookup", "best fit" », "best fit").
-        let matcher = get_option(&options, utf16!("localeMatcher"), context)?.unwrap_or_default();
+        let matcher = get_option(&options, js_str!("localeMatcher"), context)?.unwrap_or_default();
 
         // 8. Set opt.[[localeMatcher]] to matcher.
         // 9. Let localeData be %Segmenter%.[[LocaleData]].
         // 10. Let r be ResolveLocale(%Segmenter%.[[AvailableLocales]], requestedLocales, opt, %Segmenter%.[[RelevantExtensionKeys]], localeData).
         // 11. Set segmenter.[[Locale]] to r.[[locale]].
         let locale = resolve_locale::<Self>(
-            &locales,
+            requested_locales,
             &mut IntlOptions {
                 matcher,
                 ..Default::default()
             },
             context.intl_provider(),
-        );
+        )?;
 
         // 12. Let granularity be ? GetOption(options, "granularity", string, « "grapheme", "word", "sentence" », "grapheme").
-        let granularity = get_option(&options, utf16!("granularity"), context)?.unwrap_or_default();
-        // 13. Set segmenter.[[SegmenterGranularity]] to granularity.
+        let granularity =
+            get_option(&options, js_str!("granularity"), context)?.unwrap_or_default();
 
-        let native = match granularity {
-            Granularity::Grapheme => {
-                GraphemeClusterSegmenter::try_new_unstable(context.intl_provider())
+        // 13. Set segmenter.[[SegmenterGranularity]] to granularity.
+        let native = match (granularity, context.intl_provider().erased_provider()) {
+            (Granularity::Grapheme, ErasedProvider::Any(a)) => {
+                GraphemeClusterSegmenter::try_new_with_any_provider(a)
                     .map(|s| NativeSegmenter::Grapheme(Box::new(s)))
             }
-
-            Granularity::Word => WordSegmenter::try_new_auto_unstable(context.intl_provider())
-                .map(|s| NativeSegmenter::Word(Box::new(s))),
-
-            Granularity::Sentence => SentenceSegmenter::try_new_unstable(context.intl_provider())
-                .map(|s| NativeSegmenter::Sentence(Box::new(s))),
+            (Granularity::Word, ErasedProvider::Any(a)) => {
+                WordSegmenter::try_new_auto_with_any_provider(a)
+                    .map(|s| NativeSegmenter::Word(Box::new(s)))
+            }
+            (Granularity::Sentence, ErasedProvider::Any(a)) => {
+                SentenceSegmenter::try_new_with_any_provider(a)
+                    .map(|s| NativeSegmenter::Sentence(Box::new(s)))
+            }
+            (Granularity::Grapheme, ErasedProvider::Buffer(b)) => {
+                GraphemeClusterSegmenter::try_new_with_buffer_provider(b)
+                    .map(|s| NativeSegmenter::Grapheme(Box::new(s)))
+            }
+            (Granularity::Word, ErasedProvider::Buffer(b)) => {
+                WordSegmenter::try_new_auto_with_buffer_provider(b)
+                    .map(|s| NativeSegmenter::Word(Box::new(s)))
+            }
+            (Granularity::Sentence, ErasedProvider::Buffer(b)) => {
+                SentenceSegmenter::try_new_with_buffer_provider(b)
+                    .map(|s| NativeSegmenter::Sentence(Box::new(s)))
+            }
         }
         .map_err(|err| JsNativeError::typ().with_message(err.to_string()))?;
 
@@ -206,8 +232,8 @@ impl Segmenter {
         // 2. Let requestedLocales be ? CanonicalizeLocaleList(locales).
         let requested_locales = canonicalize_locale_list(locales, context)?;
 
-        // 3. Return ? SupportedLocales(availableLocales, requestedLocales, options).
-        supported_locales::<<Self as Service>::LangMarker>(&requested_locales, options, context)
+        // 3. Return ? FilterLocales(availableLocales, requestedLocales, options).
+        filter_locales::<<Self as Service>::LangMarker>(requested_locales, options, context)
             .map(JsValue::from)
     }
 
@@ -241,12 +267,12 @@ impl Segmenter {
         //     d. Perform ! CreateDataPropertyOrThrow(options, p, v).
         let options = ObjectInitializer::new(context)
             .property(
-                js_string!("locale"),
+                js_str!("locale"),
                 js_string!(segmenter.locale.to_string()),
                 Attribute::all(),
             )
             .property(
-                js_string!("granularity"),
+                js_str!("granularity"),
                 js_string!(segmenter.native.granularity().to_string()),
                 Attribute::all(),
             )
@@ -301,25 +327,25 @@ fn create_segment_data_object(
     let start = range.start;
 
     // 6. Let segment be the substring of string from startIndex to endIndex.
-    let segment = js_string!(&string[range]);
+    let segment = string.get(range).expect("range already checked");
 
     // 5. Let result be OrdinaryObjectCreate(%Object.prototype%).
     let object = &mut ObjectInitializer::new(context);
 
     object
         // 7. Perform ! CreateDataPropertyOrThrow(result, "segment", segment).
-        .property(js_string!("segment"), segment, Attribute::all())
+        .property(js_str!("segment"), segment, Attribute::all())
         // 8. Perform ! CreateDataPropertyOrThrow(result, "index", 𝔽(startIndex)).
-        .property(js_string!("index"), start, Attribute::all())
+        .property(js_str!("index"), start, Attribute::all())
         // 9. Perform ! CreateDataPropertyOrThrow(result, "input", string).
-        .property(js_string!("input"), string, Attribute::all());
+        .property(js_str!("input"), string, Attribute::all());
 
     // 10. Let granularity be segmenter.[[SegmenterGranularity]].
     // 11. If granularity is "word", then
     if let Some(is_word_like) = is_word_like {
         //     a. Let isWordLike be a Boolean value indicating whether the segment in string is "word-like" according to locale segmenter.[[Locale]].
         //     b. Perform ! CreateDataPropertyOrThrow(result, "isWordLike", isWordLike).
-        object.property(js_string!("isWordLike"), is_word_like, Attribute::all());
+        object.property(js_str!("isWordLike"), is_word_like, Attribute::all());
     }
 
     // 12. Return result.

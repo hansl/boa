@@ -27,11 +27,54 @@ impl Operation for This {
             return Ok(CompletionType::Normal);
         }
 
-        let this = context.vm.environments.get_this_binding()?;
+        let this = context
+            .vm
+            .environments
+            .get_this_binding()?
+            .unwrap_or(context.realm().global_this().clone().into());
         context.vm.frame_mut().flags |= CallFrameFlags::THIS_VALUE_CACHED;
         context.vm.stack[this_index as usize] = this.clone();
         context.vm.push(this);
         Ok(CompletionType::Normal)
+    }
+}
+
+/// `ThisForObjectEnvironmentName` implements the Opcode Operation for `Opcode::ThisForObjectEnvironmentName`
+///
+/// Operation:
+///  - Pushes `this` value that is related to the object environment of the given binding.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ThisForObjectEnvironmentName;
+
+impl ThisForObjectEnvironmentName {
+    fn operation(context: &mut Context, index: usize) -> JsResult<CompletionType> {
+        let binding_locator = context.vm.frame().code_block.bindings[index].clone();
+        let this = context
+            .this_from_object_environment_binding(&binding_locator)?
+            .map_or(JsValue::undefined(), Into::into);
+        context.vm.push(this);
+        Ok(CompletionType::Normal)
+    }
+}
+
+impl Operation for ThisForObjectEnvironmentName {
+    const NAME: &'static str = "ThisForObjectEnvironmentName";
+    const INSTRUCTION: &'static str = "INST - ThisForObjectEnvironmentName";
+    const COST: u8 = 1;
+
+    fn execute(context: &mut Context) -> JsResult<CompletionType> {
+        let index = context.vm.read::<u8>();
+        Self::operation(context, index as usize)
+    }
+
+    fn execute_with_u16_operands(context: &mut Context) -> JsResult<CompletionType> {
+        let index = context.vm.read::<u16>() as usize;
+        Self::operation(context, index)
+    }
+
+    fn execute_with_u32_operands(context: &mut Context) -> JsResult<CompletionType> {
+        let index = context.vm.read::<u32>();
+        Self::operation(context, index as usize)
     }
 }
 

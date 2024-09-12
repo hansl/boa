@@ -18,6 +18,7 @@ Currently, it has support for some of the language.
 [![Crates.io](https://img.shields.io/crates/v/boa_engine.svg)](https://crates.io/crates/boa_engine)
 [![Docs.rs](https://docs.rs/boa_engine/badge.svg)](https://docs.rs/boa_engine)
 [![Discord](https://img.shields.io/discord/595323158140158003?logo=discord)](https://discord.gg/tUFFk9Y)
+[![Matrix](https://img.shields.io/matrix/boa:matrix.org)](https://matrix.to/#/#boa:matrix.org)
 
 [build_badge]: https://github.com/boa-dev/boa/actions/workflows/rust.yml/badge.svg?event=push&branch=main
 [build_link]: https://github.com/boa-dev/boa/actions/workflows/rust.yml?query=event%3Apush+branch%3Amain
@@ -42,8 +43,9 @@ Boa currently publishes and actively maintains the following crates:
 - **`boa_profiler`** - Boa's code profiler
 - **`boa_icu_provider`** - Boa's ICU4X data provider
 - **`boa_runtime`** - Boa's WebAPI features
+- **`boa_string`** - Boa's ECMAScript string implementation.
 
-Please note: the `Boa` and `boa_unicode` crate are deprecated.
+Please note: the `Boa` and `boa_unicode` crates are deprecated.
 
 ## Boa Engine Example
 
@@ -53,7 +55,7 @@ Add the below dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-boa_engine = "0.17.3"
+boa_engine = "0.19.0"
 ```
 
 Then in `main.rs`, copy the below:
@@ -177,7 +179,9 @@ See [CHANGELOG.md](./CHANGELOG.md).
 
 ## Communication
 
-Feel free to contact us on [Discord](https://discord.gg/tUFFk9Y).
+Feel free to contact us on [Matrix](https://matrix.to/#/#boa:matrix.org) if you have any questions.
+Contributor discussions take place on the same Matrix Space if you're interested in contributing.
+We also have a [Discord](https://discord.gg/tUFFk9Y) for any questions or issues.
 
 ## License
 

@@ -17,11 +17,12 @@ use crate::{
     object::{internal_methods::get_prototype_from_constructor, ErasedVTableObject, JsObject},
     property::Attribute,
     realm::Realm,
-    string::{common::StaticJsStrings, utf16},
+    string::StaticJsStrings,
     symbol::JsSymbol,
     Context, JsArgs, JsNativeError, JsResult, JsString, JsValue,
 };
 use boa_gc::{Finalize, Trace};
+use boa_macros::js_str;
 use boa_profiler::Profiler;
 
 type NativeWeakMap = boa_gc::WeakMap<ErasedVTableObject, JsValue>;
@@ -100,14 +101,11 @@ impl BuiltInConstructor for WeakMap {
         }
 
         // 5. Let adder be ? Get(map, "set").
-        let adder = map.get(utf16!("set"), context)?;
-
         // 6. If IsCallable(adder) is false, throw a TypeError exception.
-        if !adder.is_callable() {
-            return Err(JsNativeError::typ()
-                .with_message("WeakMap: 'add' is not a function")
-                .into());
-        }
+        let adder = map
+            .get(js_str!("set"), context)?
+            .as_function()
+            .ok_or_else(|| JsNativeError::typ().with_message("WeakMap: 'add' is not a function"))?;
 
         // 7. Return ? AddEntriesFromIterable(map, iterable, adder).
         add_entries_from_iterable(&map, iterable, &adder, context)

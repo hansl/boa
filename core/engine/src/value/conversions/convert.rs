@@ -7,9 +7,10 @@
 //! if necessary).
 
 use boa_engine::JsNativeError;
+use boa_gc::{Finalize, Trace};
 
 use crate::value::TryFromJs;
-use crate::{Context, JsResult, JsString, JsValue};
+use crate::{Context, JsData, JsResult, JsString, JsValue};
 
 /// A wrapper type that allows converting a `JsValue` to a specific type.
 /// This is useful when you want to convert a `JsValue` to a Rust type.
@@ -31,15 +32,18 @@ use crate::{Context, JsResult, JsString, JsValue};
 /// # use boa_engine::{Context, js_string, JsValue};
 /// # use boa_engine::value::{Convert, TryFromJs};
 /// # let mut context = Context::default();
-/// let Convert(conv0): Convert<bool> = Convert::try_from_js(&JsValue::Integer(0), &mut context).unwrap();
-/// let Convert(conv5): Convert<bool> = Convert::try_from_js(&JsValue::Integer(5), &mut context).unwrap();
-/// let Convert(conv_nan): Convert<bool> = Convert::try_from_js(&JsValue::Rational(f64::NAN), &mut context).unwrap();
+/// let Convert(conv0): Convert<bool> =
+///     Convert::try_from_js(&JsValue::Integer(0), &mut context).unwrap();
+/// let Convert(conv5): Convert<bool> =
+///     Convert::try_from_js(&JsValue::Integer(5), &mut context).unwrap();
+/// let Convert(conv_nan): Convert<bool> =
+///     Convert::try_from_js(&JsValue::Rational(f64::NAN), &mut context).unwrap();
 ///
 /// assert_eq!(conv0, false);
 /// assert_eq!(conv5, true);
 /// assert_eq!(conv_nan, false);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Trace, Finalize, JsData)]
 pub struct Convert<T: TryFromJs>(pub T);
 
 impl<T: TryFromJs> From<T> for Convert<T> {

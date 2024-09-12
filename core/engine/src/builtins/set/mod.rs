@@ -26,14 +26,17 @@ use crate::{
     object::{internal_methods::get_prototype_from_constructor, JsObject},
     property::{Attribute, PropertyNameKind},
     realm::Realm,
-    string::{common::StaticJsStrings, utf16},
+    string::StaticJsStrings,
     symbol::JsSymbol,
     Context, JsArgs, JsResult, JsString, JsValue,
 };
+use boa_macros::js_str;
 use boa_profiler::Profiler;
 use num_traits::Zero;
 
 pub(crate) use set_iterator::SetIterator;
+
+use super::iterable::IteratorHint;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Set;
@@ -71,18 +74,18 @@ impl IntrinsicObject for Set {
             .method(Self::for_each, js_string!("forEach"), 1)
             .method(Self::has, js_string!("has"), 1)
             .property(
-                utf16!("keys"),
+                js_string!("keys"),
                 values_function.clone(),
                 Attribute::WRITABLE | Attribute::NON_ENUMERABLE | Attribute::CONFIGURABLE,
             )
             .accessor(
-                utf16!("size"),
+                js_string!("size"),
                 Some(size_getter),
                 None,
                 Attribute::CONFIGURABLE,
             )
             .property(
-                utf16!("values"),
+                js_string!("values"),
                 values_function.clone(),
                 Attribute::WRITABLE | Attribute::NON_ENUMERABLE | Attribute::CONFIGURABLE,
             )
@@ -109,6 +112,9 @@ impl BuiltInConstructor for Set {
     const STANDARD_CONSTRUCTOR: fn(&StandardConstructors) -> &StandardConstructor =
         StandardConstructors::set;
 
+    /// [`Set ( [ iterable ] )`][spec]
+    ///
+    /// [spec]: https://tc39.es/ecma262/#sec-set-iterable
     fn constructor(
         new_target: &JsValue,
         args: &[JsValue],
@@ -138,33 +144,27 @@ impl BuiltInConstructor for Set {
         }
 
         // 5. Let adder be ? Get(set, "add").
-        let adder = set.get(utf16!("add"), context)?;
+        let adder = set.get(js_str!("add"), context)?;
 
         // 6. If IsCallable(adder) is false, throw a TypeError exception.
         let adder = adder.as_callable().ok_or_else(|| {
             JsNativeError::typ().with_message("'add' of 'newTarget' is not a function")
         })?;
 
-        // 7. Let iteratorRecord be ? GetIterator(iterable).
-        let mut iterator_record = iterable.clone().get_iterator(context, None, None)?;
+        // 7. Let iteratorRecord be ? GetIterator(iterable, sync).
+        let mut iterator_record = iterable.clone().get_iterator(IteratorHint::Sync, context)?;
 
         // 8. Repeat,
-        //     a. Let next be ? IteratorStep(iteratorRecord).
-        //     b. If next is false, return set.
-        //     c. Let nextValue be ? IteratorValue(next).
-        //     d. Let status be Completion(Call(adder, set, « nextValue »)).
-        //     e. IfAbruptCloseIterator(status, iteratorRecord).
-        while !iterator_record.step(context)? {
-            let next = iterator_record.value(context)?;
-            // c
-
-            // d, e
+        //     a. Let next be ? IteratorStepValue(iteratorRecord).
+        while let Some(next) = iterator_record.step_value(context)? {
+            // c. Let status be Completion(Call(adder, set, « next »)).
             if let Err(status) = adder.call(&set.clone().into(), &[next], context) {
+                // d. IfAbruptCloseIterator(status, iteratorRecord).
                 return iterator_record.close(Err(status), context);
             }
         }
 
-        // 8.b
+        //     b. If next is done, return set.
         Ok(set.into())
     }
 }

@@ -11,7 +11,7 @@ use icu_provider::{DataLocale, DataProvider, DataRequest, DataRequestMetadata};
 
 use crate::{
     builtins::intl::{
-        locale::{best_locale_for_provider, default_locale, resolve_locale},
+        locale::{default_locale, resolve_locale},
         options::{IntlOptions, LocaleMatcher},
         Service,
     },
@@ -73,8 +73,8 @@ impl Service for TestService {
 
 #[test]
 fn locale_resolution() {
-    let provider = IntlProvider::try_new_with_buffer_provider(boa_icu_provider::buffer()).unwrap();
-    let mut default = default_locale(provider.locale_canonicalizer());
+    let provider = IntlProvider::try_new_with_buffer_provider(boa_icu_provider::buffer());
+    let mut default = default_locale(provider.locale_canonicalizer().unwrap());
     default
         .extensions
         .unicode
@@ -88,7 +88,7 @@ fn locale_resolution() {
             hc: Some(HourCycle::H11),
         },
     };
-    let locale = resolve_locale::<TestService>(&[], &mut options, &provider);
+    let locale = resolve_locale::<TestService>([], &mut options, &provider).unwrap();
     assert_eq!(locale, default);
 
     // test best fit
@@ -99,15 +99,8 @@ fn locale_resolution() {
         },
     };
 
-    let locale = resolve_locale::<TestService>(&[], &mut options, &provider);
-    let best = best_locale_for_provider::<<TestService as Service>::LangMarker>(
-        default.id.clone(),
-        &provider,
-    )
-    .unwrap();
-    let mut best = Locale::from(best);
-    best.extensions = locale.extensions.clone();
-    assert_eq!(locale, best);
+    let locale = resolve_locale::<TestService>([], &mut options, &provider).unwrap();
+    assert_eq!(locale, default);
 
     // requested: [es-ES]
     let mut options = IntlOptions {
@@ -115,6 +108,7 @@ fn locale_resolution() {
         service_options: TestOptions { hc: None },
     };
 
-    let locale = resolve_locale::<TestService>(&[locale!("es-AR")], &mut options, &provider);
+    let locale =
+        resolve_locale::<TestService>([locale!("es-AR")], &mut options, &provider).unwrap();
     assert_eq!(locale, "es-u-hc-h23".parse().unwrap());
 }

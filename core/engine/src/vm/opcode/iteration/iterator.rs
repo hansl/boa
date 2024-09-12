@@ -1,10 +1,8 @@
-use std::matches;
-
 use crate::{
     builtins::{iterable::create_iter_result_object, Array},
-    js_string,
+    js_str,
     vm::{opcode::Operation, CompletionType, GeneratorResumeKind},
-    Context, JsResult,
+    Context, JsResult, JsValue,
 };
 
 /// `IteratorNext` implements the Opcode Operation for `Opcode::IteratorNext`
@@ -69,7 +67,7 @@ impl Operation for IteratorNextWithoutPop {
 ///
 /// Operation:
 ///  - Finishes the call to `Opcode::IteratorNext` within a `for await` loop by setting the current
-/// result of the current iterator.
+///    result of the current iterator.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct IteratorFinishAsyncNext;
 
@@ -186,7 +184,12 @@ impl Operation for IteratorValueWithoutPop {
             .pop()
             .expect("iterator on the call frame must exist");
 
-        let value = iterator.value(context);
+        let value = if iterator.done() {
+            Ok(JsValue::undefined())
+        } else {
+            iterator.value(context)
+        };
+
         context.vm.frame_mut().iterators.push(iterator);
 
         context.vm.push(value?);
@@ -245,10 +248,7 @@ impl Operation for IteratorReturn {
             return Ok(CompletionType::Normal);
         }
 
-        let Some(ret) = record
-            .iterator()
-            .get_method(js_string!("return"), context)?
-        else {
+        let Some(ret) = record.iterator().get_method(js_str!("return"), context)? else {
             context.vm.push(false);
             return Ok(CompletionType::Normal);
         };

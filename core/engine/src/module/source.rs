@@ -12,7 +12,7 @@ use boa_ast::{
 };
 use boa_gc::{Finalize, Gc, GcRefCell, Trace};
 use boa_interner::Interner;
-use boa_macros::utf16;
+use boa_macros::js_str;
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
@@ -506,7 +506,7 @@ impl SourceTextModule {
             // c. For each element n of starNames, do
             for n in requested_module.get_exported_names(export_star_set, interner) {
                 // i. If SameValue(n, "default") is false, then
-                if &n != utf16!("default") {
+                if n != js_str!("default") {
                     // 1. If exportedNames does not contain n, then
                     //    a. Append n to exportedNames.
                     exported_names.insert(n);
@@ -583,7 +583,7 @@ impl SourceTextModule {
         }
 
         // 7. If SameValue(exportName, "default") is true, then
-        if &export_name.clone() == utf16!("default") {
+        if export_name == &js_str!("default") {
             // a. Assert: A default export was not explicitly defined by this module.
             // b. Return null.
             // c. NOTE: A default export cannot be provided by an export * from "mod" declaration.
@@ -1432,7 +1432,8 @@ impl SourceTextModule {
             false,
             env.clone(),
             env.clone(),
-            context,
+            context.interner_mut(),
+            false,
         );
 
         compiler.code_block_flags |= CodeBlockFlags::IS_ASYNC;
@@ -1547,32 +1548,32 @@ impl SourceTextModule {
                 // 2. Perform ! env.InitializeBinding(dn, fo).
                 //
                 // deferred to below.
-                let (spec, locator): (FunctionSpec<'_>, _) = match declaration {
-                    LexicallyScopedDeclaration::Function(f) => {
+                let (mut spec, locator): (FunctionSpec<'_>, _) = match declaration {
+                    LexicallyScopedDeclaration::FunctionDeclaration(f) => {
                         let name = bound_names(f)[0].to_js_string(compiler.interner());
                         let locator = env.create_mutable_binding(name, false);
 
                         (f.into(), locator)
                     }
-                    LexicallyScopedDeclaration::Generator(g) => {
+                    LexicallyScopedDeclaration::GeneratorDeclaration(g) => {
                         let name = bound_names(g)[0].to_js_string(compiler.interner());
                         let locator = env.create_mutable_binding(name, false);
 
                         (g.into(), locator)
                     }
-                    LexicallyScopedDeclaration::AsyncFunction(af) => {
+                    LexicallyScopedDeclaration::AsyncFunctionDeclaration(af) => {
                         let name = bound_names(af)[0].to_js_string(compiler.interner());
                         let locator = env.create_mutable_binding(name, false);
 
                         (af.into(), locator)
                     }
-                    LexicallyScopedDeclaration::AsyncGenerator(ag) => {
+                    LexicallyScopedDeclaration::AsyncGeneratorDeclaration(ag) => {
                         let name = bound_names(ag)[0].to_js_string(compiler.interner());
                         let locator = env.create_mutable_binding(name, false);
 
                         (ag.into(), locator)
                     }
-                    LexicallyScopedDeclaration::Class(class) => {
+                    LexicallyScopedDeclaration::ClassDeclaration(class) => {
                         for name in bound_names(class) {
                             let name = name.to_js_string(compiler.interner());
                             env.create_mutable_binding(name, false);
@@ -1606,6 +1607,8 @@ impl SourceTextModule {
                         continue;
                     }
                 };
+
+                spec.has_binding_identifier = false;
 
                 functions.push((spec, locator));
             }
@@ -1652,7 +1655,7 @@ impl SourceTextModule {
                     // i. Let namespace be GetModuleNamespace(importedModule).
                     let namespace = module.namespace(context);
                     context.vm.environments.put_lexical_value(
-                        locator.environment_index(),
+                        locator.environment(),
                         locator.binding_index(),
                         namespace.into(),
                     );
@@ -1664,8 +1667,8 @@ impl SourceTextModule {
                     BindingName::Name(name) => context
                         .vm
                         .environments
-                        .current()
-                        .declarative_expect()
+                        .current_declarative_ref()
+                        .expect("must be declarative")
                         .kind()
                         .as_module()
                         .expect("last environment should be the module env")
@@ -1673,7 +1676,7 @@ impl SourceTextModule {
                     BindingName::Namespace => {
                         let namespace = export_locator.module.namespace(context);
                         context.vm.environments.put_lexical_value(
-                            locator.environment_index(),
+                            locator.environment(),
                             locator.binding_index(),
                             namespace.into(),
                         );
@@ -1689,7 +1692,7 @@ impl SourceTextModule {
             let function = create_function_object_fast(code, context);
 
             context.vm.environments.put_lexical_value(
-                locator.environment_index(),
+                locator.environment(),
                 locator.binding_index(),
                 function.into(),
             );
@@ -1703,8 +1706,7 @@ impl SourceTextModule {
 
         let env = frame
             .environments
-            .current()
-            .as_declarative()
+            .current_declarative_ref()
             .cloned()
             .expect("frame must have a declarative environment");
 
@@ -1771,9 +1773,7 @@ impl SourceTextModule {
 
         context
             .vm
-            .frames
-            .last()
-            .expect("there should be a frame")
+            .frame
             .set_promise_capability(&mut context.vm.stack, capability);
 
         // 9. If module.[[HasTLA]] is false, then

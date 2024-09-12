@@ -1,6 +1,6 @@
 use crate::{
     builtins::{
-        function::{BoundFunction, ClassFieldDefinition, OrdinaryFunction},
+        function::{set_function_name, BoundFunction, ClassFieldDefinition, OrdinaryFunction},
         Array, Proxy,
     },
     context::intrinsics::{StandardConstructor, StandardConstructors},
@@ -9,7 +9,7 @@ use crate::{
     object::{JsObject, PrivateElement, PrivateName, CONSTRUCTOR, PROTOTYPE},
     property::{PropertyDescriptor, PropertyDescriptorBuilder, PropertyKey, PropertyNameKind},
     realm::Realm,
-    string::common::StaticJsStrings,
+    string::StaticJsStrings,
     value::Type,
     Context, JsResult, JsSymbol, JsValue,
 };
@@ -323,6 +323,28 @@ impl JsObject {
         self.__has_property__(&key.into(), &mut InternalMethodContext::new(context))
     }
 
+    /// Abstract optimization operation.
+    ///
+    /// Check if an object has a property and get it if it exists.
+    /// This operation combines the abstract operations `HasProperty` and `Get`.
+    ///
+    /// More information:
+    ///  - [ECMAScript reference HasProperty][spec0]
+    ///  - [ECMAScript reference Get][spec1]
+    ///
+    /// [spec0]: https://tc39.es/ecma262/#sec-hasproperty
+    /// [spec1]: https://tc39.es/ecma262/#sec-get-o-p
+    pub(crate) fn try_get<K>(&self, key: K, context: &mut Context) -> JsResult<Option<JsValue>>
+    where
+        K: Into<PropertyKey>,
+    {
+        self.__try_get__(
+            &key.into(),
+            self.clone().into(),
+            &mut InternalMethodContext::new(context),
+        )
+    }
+
     /// Check if object has an own property.
     ///
     /// More information:
@@ -341,6 +363,16 @@ impl JsObject {
         // 4. If desc is undefined, return false.
         // 5. Return true.
         Ok(desc.is_some())
+    }
+
+    /// Get all the keys of the properties of this object.
+    ///
+    /// More information:
+    ///  - [ECMAScript reference][spec]
+    ///
+    /// [spec]: https://tc39.es/ecma262/#sec-ordinary-object-internal-methods-and-internal-slots-ownpropertykeys
+    pub fn own_property_keys(&self, context: &mut Context) -> JsResult<Vec<PropertyKey>> {
+        self.__own_property_keys__(context)
     }
 
     /// `Call ( F, V [ , argumentsList ] )`
@@ -379,7 +411,11 @@ impl JsObject {
             return Ok(context.vm.pop());
         }
 
-        context.vm.frames[frame_index].set_exit_early(true);
+        if frame_index + 1 == context.vm.frames.len() {
+            context.vm.frame.set_exit_early(true);
+        } else {
+            context.vm.frames[frame_index + 1].set_exit_early(true);
+        }
 
         let result = context.run().consume();
 
@@ -429,7 +465,11 @@ impl JsObject {
                 .clone());
         }
 
-        context.vm.frames[frame_index].set_exit_early(true);
+        if frame_index + 1 == context.vm.frames.len() {
+            context.vm.frame.set_exit_early(true);
+        } else {
+            context.vm.frames[frame_index + 1].set_exit_early(true);
+        }
 
         let result = context.run().consume();
 
@@ -1037,7 +1077,7 @@ impl JsObject {
     ) -> JsResult<()> {
         // 2. Let initializer be fieldRecord.[[Initializer]].
         let initializer = match field_record {
-            ClassFieldDefinition::Public(_, function)
+            ClassFieldDefinition::Public(_, function, _)
             | ClassFieldDefinition::Private(_, function) => function,
         };
 
@@ -1055,7 +1095,18 @@ impl JsObject {
             }
             // 1. Let fieldName be fieldRecord.[[Name]].
             // 6. Else,
-            ClassFieldDefinition::Public(field_name, _) => {
+            ClassFieldDefinition::Public(field_name, _, function_name) => {
+                if let Some(function_name) = function_name {
+                    set_function_name(
+                        init_value
+                            .as_object()
+                            .expect("init value must be a function object"),
+                        function_name,
+                        None,
+                        context,
+                    );
+                }
+
                 // a. Assert: IsPropertyKey(fieldName) is true.
                 // b. Perform ? CreateDataPropertyOrThrow(receiver, fieldName, initValue).
                 self.create_data_property_or_throw(field_name.clone(), init_value, context)?;

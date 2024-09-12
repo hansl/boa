@@ -17,6 +17,7 @@ mod dup;
 mod environment;
 mod generator;
 mod get;
+mod global;
 mod iteration;
 mod meta;
 mod modifier;
@@ -59,6 +60,8 @@ pub(crate) use environment::*;
 pub(crate) use generator::*;
 #[doc(inline)]
 pub(crate) use get::*;
+#[doc(inline)]
+pub(crate) use global::*;
 #[doc(inline)]
 pub(crate) use iteration::*;
 #[doc(inline)]
@@ -120,7 +123,7 @@ pub(crate) fn read<T>(bytes: &[u8], offset: usize) -> T
 where
     T: Readable,
 {
-    assert!(offset + std::mem::size_of::<T>() - 1 < bytes.len());
+    assert!(offset + size_of::<T>() - 1 < bytes.len());
 
     // Safety: We checked that it is not an out-of-bounds read,
     // so this is safe.
@@ -208,7 +211,7 @@ impl BytecodeConversion for GeneratorResumeKind {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<u8>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         JsValue::from(value).to_generator_resume_kind()
     }
 }
@@ -219,7 +222,7 @@ impl BytecodeConversion for bool {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<u8>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value != 0
     }
 }
@@ -230,7 +233,7 @@ impl BytecodeConversion for i8 {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<Self>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value
     }
 }
@@ -241,7 +244,7 @@ impl BytecodeConversion for u8 {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<Self>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value
     }
 }
@@ -252,7 +255,7 @@ impl BytecodeConversion for i16 {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<Self>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value
     }
 }
@@ -263,7 +266,7 @@ impl BytecodeConversion for u16 {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<Self>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value
     }
 }
@@ -274,7 +277,7 @@ impl BytecodeConversion for i32 {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<Self>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value
     }
 }
@@ -285,7 +288,7 @@ impl BytecodeConversion for u32 {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<Self>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value
     }
 }
@@ -296,7 +299,7 @@ impl BytecodeConversion for i64 {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<Self>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value
     }
 }
@@ -307,7 +310,7 @@ impl BytecodeConversion for u64 {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<Self>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value
     }
 }
@@ -318,7 +321,7 @@ impl BytecodeConversion for f32 {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<Self>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value
     }
 }
@@ -329,7 +332,7 @@ impl BytecodeConversion for f64 {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let value = read::<Self>(bytes, *pc);
-        *pc += std::mem::size_of::<Self>();
+        *pc += size_of::<Self>();
         value
     }
 }
@@ -343,11 +346,11 @@ impl BytecodeConversion for ThinVec<u32> {
     }
     fn from_bytecode(bytes: &[u8], pc: &mut usize, _varying_kind: VaryingOperandKind) -> Self {
         let count = read::<u32>(bytes, *pc);
-        *pc += std::mem::size_of::<u32>();
+        *pc += size_of::<u32>();
         let mut result = Self::with_capacity(count as usize);
         for _ in 0..count {
             let item = read::<u32>(bytes, *pc);
-            *pc += std::mem::size_of::<u32>();
+            *pc += size_of::<u32>();
             result.push(item);
         }
         result
@@ -1417,10 +1420,10 @@ generate_opcodes! {
 
     /// Push a field to a class.
     ///
-    /// Operands:
+    /// Operands: is_anonymous_function: `bool`
     ///
     /// Stack: class, field_name, field_function **=>**
-    PushClassField,
+    PushClassField  { is_anonymous_function: bool },
 
     /// Push a private field to the class.
     ///
@@ -1447,7 +1450,7 @@ generate_opcodes! {
     ///
     /// Operands: index: `u32`
     ///
-    /// Stack: class, method **=>**
+    /// Stack: class, class_proto, method **=>**
     PushClassPrivateMethod { index: VaryingOperand },
 
     /// Deletes a property by name of an object.
@@ -1590,6 +1593,13 @@ generate_opcodes! {
     /// Stack: **=>**
     ThrowNewTypeError { message: VaryingOperand },
 
+    /// Throw a new `SyntaxError` exception
+    ///
+    /// Operands: message: u32
+    ///
+    /// Stack: **=>**
+    ThrowNewSyntaxError { message: VaryingOperand },
+
     /// Pops value converts it to boolean and pushes it back.
     ///
     /// Operands:
@@ -1603,6 +1613,13 @@ generate_opcodes! {
     ///
     /// Stack: **=>** this
     This,
+
+    /// Pushes `this` value that is related to the object environment of the given binding
+    ///
+    /// Operands: index: `VaryingOperand`
+    ///
+    /// Stack: **=>** value
+    ThisForObjectEnvironmentName { index: VaryingOperand },
 
     /// Pushes the current `super` value to the stack.
     ///
@@ -2070,14 +2087,50 @@ generate_opcodes! {
     /// Stack: **=>** `arguments`
     CreateUnmappedArgumentsObject,
 
+    /// Performs [`HasRestrictedGlobalProperty ( N )`][spec]
+    ///
+    /// Operands: `index`: u32
+    ///
+    /// Stack: **=>**
+    ///
+    /// [spec]: https://tc39.es/ecma262/#sec-hasrestrictedglobalproperty
+    HasRestrictedGlobalProperty { index: VaryingOperand },
+
+    /// Performs [`CanDeclareGlobalFunction ( N )`][spec]
+    ///
+    /// Operands: `index`: u32
+    ///
+    /// Stack: **=>**
+    ///
+    /// [spec]: https://tc39.es/ecma262/#sec-candeclareglobalfunction
+    CanDeclareGlobalFunction { index: VaryingOperand },
+
+    /// Performs [`CanDeclareGlobalVar ( N )`][spec]
+    ///
+    /// Operands: `index`: u32
+    ///
+    /// Stack: **=>**
+    ///
+    /// [spec]: https://tc39.es/ecma262/#sec-candeclareglobalvar
+    CanDeclareGlobalVar { index: VaryingOperand },
+
     /// Performs [`CreateGlobalFunctionBinding ( N, V, D )`][spec]
     ///
-    /// Operands: configurable: `bool`, `name_index`: `VaryingOperand`
+    /// Operands: configurable: `bool`, `index`: `VaryingOperand`
     ///
-    /// Stack: `value` **=>**
+    /// Stack: `function` **=>**
     ///
     /// [spec]: https://tc39.es/ecma262/#sec-createglobalfunctionbinding
-    CreateGlobalFunctionBinding { configurable: bool, name_index: VaryingOperand },
+    CreateGlobalFunctionBinding { configurable: bool, index: VaryingOperand },
+
+    /// Performs [`CreateGlobalVarBinding ( N, V, D )`][spec]
+    ///
+    /// Operands: configurable: `bool`, `index`: `VaryingOperand`
+    ///
+    /// Stack: **=>**
+    ///
+    /// [spec]: https://tc39.es/ecma262/#sec-createglobalvarbinding
+    CreateGlobalVarBinding { configurable: bool, index: VaryingOperand },
 
     /// No-operation instruction, does nothing.
     ///
@@ -2206,18 +2259,6 @@ generate_opcodes! {
     Reserved52 => Reserved,
     /// Reserved [`Opcode`].
     Reserved53 => Reserved,
-    /// Reserved [`Opcode`].
-    Reserved54 => Reserved,
-    /// Reserved [`Opcode`].
-    Reserved55 => Reserved,
-    /// Reserved [`Opcode`].
-    Reserved56 => Reserved,
-    /// Reserved [`Opcode`].
-    Reserved57 => Reserved,
-    /// Reserved [`Opcode`].
-    Reserved58 => Reserved,
-    /// Reserved [`Opcode`].
-    Reserved59 => Reserved,
 }
 
 /// Specific opcodes for bindings.

@@ -1,15 +1,18 @@
 //! A Rust API wrapper for Boa's `Map` Builtin ECMAScript Object
 use crate::{
-    builtins::map::{add_entries_from_iterable, ordered_map::OrderedMap},
-    builtins::Map,
+    builtins::{
+        iterable::IteratorHint,
+        map::{add_entries_from_iterable, ordered_map::OrderedMap},
+        Map,
+    },
     error::JsNativeError,
-    object::{JsFunction, JsMapIterator, JsObject, JsObjectType},
-    string::utf16,
+    object::{JsFunction, JsMapIterator, JsObject},
     value::TryFromJs,
     Context, JsResult, JsValue,
 };
 
 use boa_gc::{Finalize, Trace};
+use boa_macros::js_str;
 use std::ops::Deref;
 
 /// `JsMap` provides a wrapper for Boa's implementation of the ECMAScript `Map` object.
@@ -20,7 +23,7 @@ use std::ops::Deref;
 /// ```
 /// # use boa_engine::{
 /// #  object::builtins::JsMap,
-/// #  Context, JsValue, JsResult, js_string
+/// #  Context, JsValue, JsResult, js_str
 /// # };
 /// # fn main() -> JsResult<()> {
 /// // Create default `Context`
@@ -30,8 +33,8 @@ use std::ops::Deref;
 /// let map = JsMap::new(context);
 ///
 /// // Set key-value pairs for the `JsMap`.
-/// map.set(js_string!("Key-1"), js_string!("Value-1"), context)?;
-/// map.set(js_string!("Key-2"), 10, context)?;
+/// map.set(js_str!("Key-1"), js_str!("Value-1"), context)?;
+/// map.set(js_str!("Key-2"), 10, context)?;
 ///
 /// assert_eq!(map.get_size(context)?, 2.into());
 /// # Ok(())
@@ -42,7 +45,7 @@ use std::ops::Deref;
 /// ```
 /// # use boa_engine::{
 /// #    object::builtins::{JsArray, JsMap},
-/// #    Context, JsValue, JsResult, js_string
+/// #    Context, JsValue, JsResult, js_str
 /// # };
 /// # fn main() -> JsResult<()> {
 /// // Create a default `Context`
@@ -53,8 +56,8 @@ use std::ops::Deref;
 ///
 /// // Create a `[key, value]` pair of JsValues
 /// let vec_one: Vec<JsValue> = vec![
-///     js_string!("first-key").into(),
-///     js_string!("first-value").into()
+///     js_str!("first-key").into(),
+///     js_str!("first-value").into()
 /// ];
 ///
 /// // We create an push our `[key, value]` pair onto our array as a `JsArray`
@@ -64,8 +67,8 @@ use std::ops::Deref;
 /// let js_iterable_map = JsMap::from_js_iterable(&js_array.into(), context)?;
 ///
 /// assert_eq!(
-///     js_iterable_map.get(js_string!("first-key"), context)?,
-///     js_string!("first-value").into()
+///     js_iterable_map.get(js_str!("first-key"), context)?,
+///     js_str!("first-value").into()
 /// );
 ///
 /// # Ok(())
@@ -102,7 +105,7 @@ impl JsMap {
     /// ```
     /// # use boa_engine::{
     /// #    object::builtins::{JsArray, JsMap},
-    /// #    Context, JsResult, JsValue, js_string
+    /// #    Context, JsResult, JsValue, js_str
     /// # };
     /// # fn main() -> JsResult<()> {
     /// # // Create a default `Context`
@@ -111,10 +114,7 @@ impl JsMap {
     /// let js_array = JsArray::new(context);
     ///
     /// // Create a `[key, value]` pair of JsValues and add it to the `JsArray` as a `JsArray`
-    /// let vec_one: Vec<JsValue> = vec![
-    ///     js_string!("first-key").into(),
-    ///     js_string!("first-value").into()
-    /// ];
+    /// let vec_one: Vec<JsValue> = vec![js_str!("first-key").into(), js_str!("first-value").into()];
     /// js_array.push(JsArray::from_iter(vec_one, context), context)?;
     ///
     /// // Create a `JsMap` from the `JsArray` using it's iterable property.
@@ -129,8 +129,11 @@ impl JsMap {
 
         // Let adder be Get(map, "set") per spec. This action should not fail with default map.
         let adder = map
-            .get(utf16!("set"), context)
-            .expect("creating a map with the default prototype must not fail");
+            .get(js_str!("set"), context)?
+            .as_function()
+            .ok_or_else(|| {
+                JsNativeError::typ().with_message("property `set` on new `Map` must be callable")
+            })?;
 
         let _completion_record = add_entries_from_iterable(&map, iterable, &adder, context)?;
 
@@ -202,7 +205,7 @@ impl JsMap {
     #[inline]
     pub fn entries(&self, context: &mut Context) -> JsResult<JsMapIterator> {
         let iterator_record = Map::entries(&self.inner.clone().into(), &[], context)?
-            .get_iterator(context, None, None)?;
+            .get_iterator(IteratorHint::Sync, context)?;
         let map_iterator_object = iterator_record.iterator();
         JsMapIterator::from_object(map_iterator_object.clone())
     }
@@ -211,7 +214,7 @@ impl JsMap {
     #[inline]
     pub fn keys(&self, context: &mut Context) -> JsResult<JsMapIterator> {
         let iterator_record = Map::keys(&self.inner.clone().into(), &[], context)?
-            .get_iterator(context, None, None)?;
+            .get_iterator(IteratorHint::Sync, context)?;
         let map_iterator_object = iterator_record.iterator();
         JsMapIterator::from_object(map_iterator_object.clone())
     }
@@ -223,19 +226,16 @@ impl JsMap {
     /// ```
     /// # use boa_engine::{
     /// #    object::builtins::JsMap,
-    /// #    Context, JsValue, JsResult, js_string
+    /// #    Context, JsValue, JsResult, js_str
     /// # };
     /// # fn main() -> JsResult<()> {
     /// # let context = &mut Context::default();
     /// let js_map = JsMap::new(context);
     ///
-    /// js_map.set(js_string!("foo"), js_string!("bar"), context)?;
+    /// js_map.set(js_str!("foo"), js_str!("bar"), context)?;
     /// js_map.set(2, 4, context)?;
     ///
-    /// assert_eq!(
-    ///     js_map.get(js_string!("foo"), context)?,
-    ///     js_string!("bar").into()
-    /// );
+    /// assert_eq!(js_map.get(js_str!("foo"), context)?, js_str!("bar").into());
     /// assert_eq!(js_map.get(2, context)?, 4.into());
     /// # Ok(())
     /// # }
@@ -259,13 +259,13 @@ impl JsMap {
     /// ```
     /// # use boa_engine::{
     /// #    object::builtins::JsMap,
-    /// #    Context, JsValue, JsResult, js_string
+    /// #    Context, JsValue, JsResult, js_str
     /// # };
     /// # fn main() -> JsResult<()> {
     /// # let context = &mut Context::default();
     /// let js_map = JsMap::new(context);
     ///
-    /// js_map.set(js_string!("foo"), js_string!("bar"), context)?;
+    /// js_map.set(js_str!("foo"), js_str!("bar"), context)?;
     ///
     /// let map_size = js_map.get_size(context)?;
     ///
@@ -285,21 +285,18 @@ impl JsMap {
     /// ```
     /// # use boa_engine::{
     /// #    object::builtins::JsMap,
-    /// #    Context, JsValue, JsResult, js_string
+    /// #    Context, JsValue, JsResult, js_str
     /// # };
     /// # fn main() -> JsResult<()> {
     /// # let context = &mut Context::default();
     /// let js_map = JsMap::new(context);
-    /// js_map.set(js_string!("foo"), js_string!("bar"), context)?;
-    /// js_map.set(js_string!("hello"), js_string!("world"), context)?;
+    /// js_map.set(js_str!("foo"), js_str!("bar"), context)?;
+    /// js_map.set(js_str!("hello"), js_str!("world"), context)?;
     ///
-    /// js_map.delete(js_string!("foo"), context)?;
+    /// js_map.delete(js_str!("foo"), context)?;
     ///
     /// assert_eq!(js_map.get_size(context)?, 1.into());
-    /// assert_eq!(
-    ///     js_map.get(js_string!("foo"), context)?,
-    ///     JsValue::undefined()
-    /// );
+    /// assert_eq!(js_map.get(js_str!("foo"), context)?, JsValue::undefined());
     /// # Ok(())
     /// # }
     /// ```
@@ -317,16 +314,16 @@ impl JsMap {
     /// ```
     /// # use boa_engine::{
     /// #    object::builtins::JsMap,
-    /// #    Context, JsValue, JsResult, js_string
+    /// #    Context, JsValue, JsResult, js_str
     /// # };
     /// # fn main() -> JsResult<()> {
     /// # let context = &mut Context::default();
     /// let js_map = JsMap::new(context);
-    /// js_map.set(js_string!("foo"), js_string!("bar"), context)?;
+    /// js_map.set(js_str!("foo"), js_str!("bar"), context)?;
     ///
-    /// let retrieved_value = js_map.get(js_string!("foo"), context)?;
+    /// let retrieved_value = js_map.get(js_str!("foo"), context)?;
     ///
-    /// assert_eq!(retrieved_value, js_string!("bar").into());
+    /// assert_eq!(retrieved_value, js_str!("bar").into());
     /// # Ok(())
     /// # }
     /// ```
@@ -344,13 +341,13 @@ impl JsMap {
     /// ```
     /// # use boa_engine::{
     /// #    object::builtins::JsMap,
-    /// #    Context, JsValue, JsResult, js_string
+    /// #    Context, JsValue, JsResult, js_str
     /// # };
     /// # fn main() -> JsResult<()> {
     /// # let context = &mut Context::default();
     /// let js_map = JsMap::new(context);
-    /// js_map.set(js_string!("foo"), js_string!("bar"), context)?;
-    /// js_map.set(js_string!("hello"), js_string!("world"), context)?;
+    /// js_map.set(js_str!("foo"), js_str!("bar"), context)?;
+    /// js_map.set(js_str!("hello"), js_str!("world"), context)?;
     ///
     /// js_map.clear(context)?;
     ///
@@ -370,14 +367,14 @@ impl JsMap {
     /// ```
     /// # use boa_engine::{
     /// #    object::builtins::JsMap,
-    /// #    Context, JsValue, JsResult, js_string
+    /// #    Context, JsValue, JsResult, js_str
     /// # };
     /// # fn main() -> JsResult<()> {
     /// # let context = &mut Context::default();
     /// let js_map = JsMap::new(context);
-    /// js_map.set(js_string!("foo"), js_string!("bar"), context)?;
+    /// js_map.set(js_str!("foo"), js_str!("bar"), context)?;
     ///
-    /// let has_key = js_map.has(js_string!("foo"), context)?;
+    /// let has_key = js_map.has(js_str!("foo"), context)?;
     ///
     /// assert_eq!(has_key, true.into());
     /// # Ok(())
@@ -409,7 +406,7 @@ impl JsMap {
     #[inline]
     pub fn values(&self, context: &mut Context) -> JsResult<JsMapIterator> {
         let iterator_record = Map::values(&self.inner.clone().into(), &[], context)?
-            .get_iterator(context, None, None)?;
+            .get_iterator(IteratorHint::Sync, context)?;
         let map_iterator_object = iterator_record.iterator();
         JsMapIterator::from_object(map_iterator_object.clone())
     }
@@ -437,8 +434,6 @@ impl Deref for JsMap {
         &self.inner
     }
 }
-
-impl JsObjectType for JsMap {}
 
 impl TryFromJs for JsMap {
     fn try_from_js(value: &JsValue, _context: &mut Context) -> JsResult<Self> {

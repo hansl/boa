@@ -8,14 +8,14 @@ use crate::{
         generator::{GeneratorContext, GeneratorState},
     },
     error::JsNativeError,
+    js_str,
     object::PROTOTYPE,
-    string::utf16,
     vm::{
         call_frame::GeneratorResumeKind,
         opcode::{Operation, ReThrow},
         CallFrame, CompletionType,
     },
-    Context, JsError, JsObject, JsResult, JsValue,
+    Context, JsError, JsObject, JsResult,
 };
 
 pub(crate) use yield_stm::*;
@@ -118,32 +118,40 @@ impl Operation for AsyncGeneratorClose {
 
     fn execute(context: &mut Context) -> JsResult<CompletionType> {
         // Step 3.e-g in [AsyncGeneratorStart](https://tc39.es/ecma262/#sec-asyncgeneratorstart)
-        let async_generator_object = context
+        let generator = context
             .vm
             .frame()
             .async_generator_object(&context.vm.stack)
-            .expect("There should be a object");
-
-        let mut gen = async_generator_object
-            .downcast_mut::<AsyncGenerator>()
+            .expect("There should be a object")
+            .downcast::<AsyncGenerator>()
             .expect("must be async generator");
 
-        gen.state = AsyncGeneratorState::Completed;
-        gen.context = None;
+        let mut gen = generator.borrow_mut();
 
-        let next = gen.queue.pop_front().expect("must have item in queue");
+        // e. Assert: If we return here, the async generator either threw an exception or performed either an implicit or explicit return.
+        // f. Remove acGenContext from the execution context stack and restore the execution context that is at the top of the execution context stack as the running execution context.
+
+        // g. Set acGenerator.[[AsyncGeneratorState]] to draining-queue.
+        gen.data.state = AsyncGeneratorState::DrainingQueue;
+
+        // h. If result is a normal completion, set result to NormalCompletion(undefined).
+        // i. If result is a return completion, set result to NormalCompletion(result.[[Value]]).
+        let return_value = context.vm.take_return_value();
+
+        let result = context
+            .vm
+            .pending_exception
+            .take()
+            .map_or(Ok(return_value), Err);
+
         drop(gen);
 
-        let return_value = context.vm.get_return_value();
-        context.vm.set_return_value(JsValue::undefined());
+        // j. Perform AsyncGeneratorCompleteStep(acGenerator, result, true).
+        AsyncGenerator::complete_step(&generator, result, true, None, context);
+        // k. Perform AsyncGeneratorDrainQueue(acGenerator).
+        AsyncGenerator::drain_queue(&generator, context);
 
-        if let Some(error) = context.vm.pending_exception.take() {
-            AsyncGenerator::complete_step(&next, Err(error), true, None, context);
-        } else {
-            AsyncGenerator::complete_step(&next, Ok(return_value), true, None, context);
-        }
-        AsyncGenerator::drain_queue(&async_generator_object, context);
-
+        // l. Return undefined.
         Ok(CompletionType::Normal)
     }
 }
@@ -244,7 +252,7 @@ impl Operation for GeneratorDelegateNext {
             GeneratorResumeKind::Throw => {
                 let throw = iterator_record
                     .iterator()
-                    .get_method(utf16!("throw"), context)?;
+                    .get_method(js_str!("throw"), context)?;
                 if let Some(throw) = throw {
                     let result = throw.call(
                         &iterator_record.iterator().clone().into(),
@@ -265,7 +273,7 @@ impl Operation for GeneratorDelegateNext {
             GeneratorResumeKind::Return => {
                 let r#return = iterator_record
                     .iterator()
-                    .get_method(utf16!("return"), context)?;
+                    .get_method(js_str!("return"), context)?;
                 if let Some(r#return) = r#return {
                     let result = r#return.call(
                         &iterator_record.iterator().clone().into(),

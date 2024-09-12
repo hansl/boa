@@ -9,7 +9,7 @@
 
 use crate::{
     builtins::{
-        iterable::iterable_to_list, Array, BuiltInBuilder, BuiltInConstructor, BuiltInObject,
+        iterable::IteratorHint, Array, BuiltInBuilder, BuiltInConstructor, BuiltInObject,
         IntrinsicObject,
     },
     context::intrinsics::{Intrinsics, StandardConstructor, StandardConstructors},
@@ -17,9 +17,10 @@ use crate::{
     object::{internal_methods::get_prototype_from_constructor, JsObject},
     property::{Attribute, PropertyDescriptorBuilder},
     realm::Realm,
-    string::{common::StaticJsStrings, utf16},
+    string::StaticJsStrings,
     Context, JsArgs, JsResult, JsString, JsValue,
 };
+use boa_macros::js_str;
 use boa_profiler::Profiler;
 
 use super::{Error, ErrorObject};
@@ -35,8 +36,8 @@ impl IntrinsicObject for AggregateError {
         BuiltInBuilder::from_standard_constructor::<Self>(realm)
             .prototype(realm.intrinsics().constructors().error().constructor())
             .inherits(Some(realm.intrinsics().constructors().error().prototype()))
-            .property(utf16!("name"), Self::NAME, attribute)
-            .property(utf16!("message"), js_string!(), attribute)
+            .property(js_str!("name"), Self::NAME, attribute)
+            .property(js_str!("message"), js_string!(), attribute)
             .build();
     }
 
@@ -55,7 +56,11 @@ impl BuiltInConstructor for AggregateError {
     const STANDARD_CONSTRUCTOR: fn(&StandardConstructors) -> &StandardConstructor =
         StandardConstructors::aggregate_error;
 
-    /// Create a new aggregate error object.
+    /// [`AggregateError ( errors, message [ , options ] )`][spec]
+    ///
+    /// Creates a new aggregate error object.
+    ///
+    /// [spec]: AggregateError ( errors, message [ , options ] )
     fn constructor(
         new_target: &JsValue,
         args: &[JsValue],
@@ -95,15 +100,18 @@ impl BuiltInConstructor for AggregateError {
             let msg = message.to_string(context)?;
 
             // b. Perform CreateNonEnumerableDataPropertyOrThrow(O, "message", msg).
-            o.create_non_enumerable_data_property_or_throw(utf16!("message"), msg, context);
+            o.create_non_enumerable_data_property_or_throw(js_str!("message"), msg, context);
         }
 
         // 4. Perform ? InstallErrorCause(O, options).
         Error::install_error_cause(&o, args.get_or_undefined(2), context)?;
 
-        // 5. Let errorsList be ? IterableToList(errors).
+        // 5. Let errorsList be ? IteratorToList(? GetIterator(errors, sync)).
         let errors = args.get_or_undefined(0);
-        let errors_list = iterable_to_list(context, errors, None)?;
+        let errors_list = errors
+            .get_iterator(IteratorHint::Sync, context)?
+            .into_list(context)?;
+
         // 6. Perform ! DefinePropertyOrThrow(O, "errors",
         //    PropertyDescriptor {
         //      [[Configurable]]: true,
@@ -112,7 +120,7 @@ impl BuiltInConstructor for AggregateError {
         //      [[Value]]: CreateArrayFromList(errorsList)
         //    }).
         o.define_property_or_throw(
-            utf16!("errors"),
+            js_str!("errors"),
             PropertyDescriptorBuilder::new()
                 .configurable(true)
                 .enumerable(false)

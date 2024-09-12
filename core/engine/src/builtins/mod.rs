@@ -36,6 +36,7 @@ pub mod weak_set;
 
 mod builder;
 
+use boa_macros::js_str;
 use builder::BuiltInBuilder;
 
 #[cfg(feature = "annex-b")]
@@ -108,7 +109,6 @@ use crate::{
     object::JsObject,
     property::{Attribute, PropertyDescriptor},
     realm::Realm,
-    string::utf16,
     Context, JsResult, JsString, JsValue,
 };
 
@@ -140,6 +140,8 @@ pub(crate) trait BuiltInObject: IntrinsicObject {
     /// E.g. If you want access the properties of a `Complex` built-in with the name `Cplx` you must
     /// assign `"Cplx"` to this constant, making any property inside it accessible from ECMAScript
     /// as `Cplx.prop`
+    // `JsString` can only be const-constructed for static strings.
+    #[allow(clippy::declare_interior_mutable_const)]
     const NAME: JsString;
 
     /// Property attribute flags of the built-in. Check [`Attribute`] for more information.
@@ -284,7 +286,6 @@ impl Realm {
 
         #[cfg(feature = "temporal")]
         {
-            temporal::TimeZone::init(self);
             temporal::Temporal::init(self);
             temporal::Now::init(self);
             temporal::Instant::init(self);
@@ -295,7 +296,6 @@ impl Realm {
             temporal::PlainMonthDay::init(self);
             temporal::PlainYearMonth::init(self);
             temporal::ZonedDateTime::init(self);
-            temporal::Calendar::init(self);
         }
     }
 }
@@ -307,7 +307,7 @@ pub(crate) fn set_default_global_bindings(context: &mut Context) -> JsResult<()>
     let global_object = context.global_object();
 
     global_object.define_property_or_throw(
-        utf16!("globalThis"),
+        js_str!("globalThis"),
         PropertyDescriptor::builder()
             .value(context.realm().global_this().clone())
             .writable(true)
@@ -320,17 +320,17 @@ pub(crate) fn set_default_global_bindings(context: &mut Context) -> JsResult<()>
         .enumerable(false)
         .configurable(false);
     global_object.define_property_or_throw(
-        utf16!("Infinity"),
+        js_str!("Infinity"),
         restricted.clone().value(f64::INFINITY),
         context,
     )?;
     global_object.define_property_or_throw(
-        utf16!("NaN"),
+        js_str!("NaN"),
         restricted.clone().value(f64::NAN),
         context,
     )?;
     global_object.define_property_or_throw(
-        utf16!("undefined"),
+        js_str!("undefined"),
         restricted.value(JsValue::undefined()),
         context,
     )?;

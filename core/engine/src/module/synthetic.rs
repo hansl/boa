@@ -286,7 +286,8 @@ impl SyntheticModule {
             false,
             module_compile_env.clone(),
             module_compile_env.clone(),
-            context,
+            context.interner_mut(),
+            false,
         );
 
         // 4. For each String exportName in module.[[ExportNames]], do
@@ -307,15 +308,14 @@ impl SyntheticModule {
         for locator in exports {
             //     b. Perform ! env.InitializeBinding(exportName, undefined).
             envs.put_lexical_value(
-                locator.environment_index(),
+                locator.environment(),
                 locator.binding_index(),
                 JsValue::undefined(),
             );
         }
 
         let env = envs
-            .current()
-            .as_declarative()
+            .current_declarative_ref()
             .cloned()
             .expect("should have the module environment");
 

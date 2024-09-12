@@ -1,14 +1,12 @@
 //! This module contains the [`TryFromJs`] trait, and conversions to basic Rust types.
 
 use num_bigint::BigInt;
-use rustc_hash::FxHashMap;
-use std::hash::Hash;
+use num_traits::AsPrimitive;
 
-use crate::object::JsMap;
-use crate::{
-    js_string, Context, JsArgs, JsBigInt, JsError, JsNativeError, JsObject, JsResult, JsString,
-    JsValue,
-};
+use crate::{js_string, Context, JsBigInt, JsNativeError, JsObject, JsResult, JsString, JsValue};
+
+mod collections;
+mod tuples;
 
 /// This trait adds a fallible and efficient conversions from a [`JsValue`] to Rust types.
 pub trait TryFromJs: Sized {
@@ -108,56 +106,6 @@ where
     }
 }
 
-fn fx_hash_from_map<K: TryFromJs + Eq + Hash, V: TryFromJs>(
-    map: &JsMap,
-    context: &mut Context,
-) -> JsResult<FxHashMap<K, V>> {
-    let mut result = FxHashMap::default();
-
-    let it = map.entries(context)?;
-    loop {
-        let item = it.next(context)?;
-        let inner = item.create_list_from_array_like(&[], context)?;
-
-        let k: K = K::try_from_js(inner.get_or_undefined(0), context)?;
-        let v: V = V::try_from_js(inner.get_or_undefined(1), context)?;
-
-        result.insert(k, v);
-    }
-    Ok(result)
-}
-
-fn fx_hash_from_properties<K: TryFromJs + Eq + Hash, V: TryFromJs>(
-    object: &JsObject,
-    context: &mut Context,
-) -> JsResult<FxHashMap<K, V>> {
-    let properties = object.__own_property_keys__(context)?;
-    let mut result = FxHashMap::default();
-
-    for key in properties {
-        let value = object.get(key.clone(), context)?;
-        let k = K::try_from_js(&key.into(), context)?;
-        let v = V::try_from_js(&value, context)?;
-
-        result.insert(k, v);
-    }
-
-    Ok(result)
-}
-
-impl<K: TryFromJs + Eq + Hash, V: TryFromJs> TryFromJs for FxHashMap<K, V> {
-    fn try_from_js(value: &JsValue, context: &mut Context) -> JsResult<Self> {
-        let o = value.as_object().ok_or_else(|| {
-            JsError::from_native(JsNativeError::typ().with_message("Value must be an object"))
-        })?;
-
-        match JsMap::from_object(o.clone()) {
-            Ok(map) => fx_hash_from_map(&map, context),
-            Err(_e) => fx_hash_from_properties(o, context),
-        }
-    }
-}
-
 impl TryFromJs for JsObject {
     fn try_from_js(value: &JsValue, _context: &mut Context) -> JsResult<Self> {
         match value {
@@ -209,12 +157,28 @@ impl TryFromJs for f64 {
     }
 }
 
+fn from_f64<T>(v: f64) -> Option<T>
+where
+    T: AsPrimitive<f64>,
+    f64: AsPrimitive<T>,
+{
+    if <f64 as AsPrimitive<T>>::as_(v).as_().to_bits() == v.to_bits() {
+        return Some(v.as_());
+    }
+    None
+}
+
 impl TryFromJs for i8 {
     fn try_from_js(value: &JsValue, _context: &mut Context) -> JsResult<Self> {
         match value {
             JsValue::Integer(i) => (*i).try_into().map_err(|e| {
                 JsNativeError::typ()
                     .with_message(format!("cannot convert value to a i8: {e}"))
+                    .into()
+            }),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a i8")
                     .into()
             }),
             _ => Err(JsNativeError::typ()
@@ -232,6 +196,11 @@ impl TryFromJs for u8 {
                     .with_message(format!("cannot convert value to a u8: {e}"))
                     .into()
             }),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a u8")
+                    .into()
+            }),
             _ => Err(JsNativeError::typ()
                 .with_message("cannot convert value to a u8")
                 .into()),
@@ -245,6 +214,11 @@ impl TryFromJs for i16 {
             JsValue::Integer(i) => (*i).try_into().map_err(|e| {
                 JsNativeError::typ()
                     .with_message(format!("cannot convert value to a i16: {e}"))
+                    .into()
+            }),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a i16")
                     .into()
             }),
             _ => Err(JsNativeError::typ()
@@ -262,6 +236,11 @@ impl TryFromJs for u16 {
                     .with_message(format!("cannot convert value to a iu16: {e}"))
                     .into()
             }),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a u16")
+                    .into()
+            }),
             _ => Err(JsNativeError::typ()
                 .with_message("cannot convert value to a u16")
                 .into()),
@@ -273,6 +252,11 @@ impl TryFromJs for i32 {
     fn try_from_js(value: &JsValue, _context: &mut Context) -> JsResult<Self> {
         match value {
             JsValue::Integer(i) => Ok(*i),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a i32")
+                    .into()
+            }),
             _ => Err(JsNativeError::typ()
                 .with_message("cannot convert value to a i32")
                 .into()),
@@ -288,6 +272,11 @@ impl TryFromJs for u32 {
                     .with_message(format!("cannot convert value to a u32: {e}"))
                     .into()
             }),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a u32")
+                    .into()
+            }),
             _ => Err(JsNativeError::typ()
                 .with_message("cannot convert value to a u32")
                 .into()),
@@ -299,6 +288,11 @@ impl TryFromJs for i64 {
     fn try_from_js(value: &JsValue, _context: &mut Context) -> JsResult<Self> {
         match value {
             JsValue::Integer(i) => Ok((*i).into()),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a i64")
+                    .into()
+            }),
             _ => Err(JsNativeError::typ()
                 .with_message("cannot convert value to a i64")
                 .into()),
@@ -312,6 +306,11 @@ impl TryFromJs for u64 {
             JsValue::Integer(i) => (*i).try_into().map_err(|e| {
                 JsNativeError::typ()
                     .with_message(format!("cannot convert value to a u64: {e}"))
+                    .into()
+            }),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a u64")
                     .into()
             }),
             _ => Err(JsNativeError::typ()
@@ -329,6 +328,11 @@ impl TryFromJs for usize {
                     .with_message(format!("cannot convert value to a usize: {e}"))
                     .into()
             }),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a usize")
+                    .into()
+            }),
             _ => Err(JsNativeError::typ()
                 .with_message("cannot convert value to a usize")
                 .into()),
@@ -340,6 +344,11 @@ impl TryFromJs for i128 {
     fn try_from_js(value: &JsValue, _context: &mut Context) -> JsResult<Self> {
         match value {
             JsValue::Integer(i) => Ok((*i).into()),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a i128")
+                    .into()
+            }),
             _ => Err(JsNativeError::typ()
                 .with_message("cannot convert value to a i128")
                 .into()),
@@ -355,11 +364,46 @@ impl TryFromJs for u128 {
                     .with_message(format!("cannot convert value to a u128: {e}"))
                     .into()
             }),
+            JsValue::Rational(f) => from_f64(*f).ok_or_else(|| {
+                JsNativeError::typ()
+                    .with_message("cannot convert value to a u128")
+                    .into()
+            }),
             _ => Err(JsNativeError::typ()
                 .with_message("cannot convert value to a u128")
                 .into()),
         }
     }
+}
+
+#[test]
+fn integer_floating_js_value_to_integer() {
+    let context = &mut Context::default();
+
+    assert_eq!(i8::try_from_js(&JsValue::from(4.0), context), Ok(4));
+    assert_eq!(u8::try_from_js(&JsValue::from(4.0), context), Ok(4));
+    assert_eq!(i16::try_from_js(&JsValue::from(4.0), context), Ok(4));
+    assert_eq!(u16::try_from_js(&JsValue::from(4.0), context), Ok(4));
+    assert_eq!(i32::try_from_js(&JsValue::from(4.0), context), Ok(4));
+    assert_eq!(u32::try_from_js(&JsValue::from(4.0), context), Ok(4));
+    assert_eq!(i64::try_from_js(&JsValue::from(4.0), context), Ok(4));
+    assert_eq!(u64::try_from_js(&JsValue::from(4.0), context), Ok(4));
+
+    // Floating with fractional part
+    let result = i32::try_from_js(&JsValue::from(4.000_000_000_000_001), context);
+    assert!(result.is_err());
+
+    // NaN
+    let result = i32::try_from_js(&JsValue::nan(), context);
+    assert!(result.is_err());
+
+    // +Infinity
+    let result = i32::try_from_js(&JsValue::positive_infinity(), context);
+    assert!(result.is_err());
+
+    // -Infinity
+    let result = i32::try_from_js(&JsValue::negative_infinity(), context);
+    assert!(result.is_err());
 }
 
 #[test]
@@ -418,5 +462,100 @@ fn value_into_vec() {
                 true
             },
         ),
+    ]);
+}
+
+#[test]
+fn value_into_tuple() {
+    use boa_engine::{run_test_actions, TestAction};
+    use indoc::indoc;
+
+    run_test_actions([
+        TestAction::assert_with_op(indoc! {r#" [42, "hello", true] "#}, |value, context| {
+            type TestType = (i32, String, bool);
+            TestType::try_from_js(&value, context).unwrap() == (42, "hello".to_string(), true)
+        }),
+        TestAction::assert_with_op(indoc! {r#" [42, "hello", true] "#}, |value, context| {
+            type TestType = (i32, String, Option<bool>, Option<u8>);
+            TestType::try_from_js(&value, context).unwrap()
+                == (42, "hello".to_string(), Some(true), None)
+        }),
+        TestAction::assert_with_op(indoc! {r#" [] "#}, |value, context| {
+            type TestType = (
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+                Option<bool>,
+            );
+            TestType::try_from_js(&value, context).unwrap()
+                == (None, None, None, None, None, None, None, None, None, None)
+        }),
+        TestAction::assert_with_op(indoc!(r#"[42, "hello", {}]"#), |value, context| {
+            type TestType = (i32, String, bool);
+            let Err(value) = TestType::try_from_js(&value, context) else {
+                return false;
+            };
+            assert!(value.to_string().contains("TypeError"));
+            true
+        }),
+        TestAction::assert_with_op(indoc!(r#"[42, "hello"]"#), |value, context| {
+            type TestType = (i32, String, bool);
+            let Err(value) = TestType::try_from_js(&value, context) else {
+                return false;
+            };
+            assert!(value.to_string().contains("TypeError"));
+            true
+        }),
+    ]);
+}
+
+#[test]
+fn value_into_map() {
+    use boa_engine::{run_test_actions, TestAction};
+    use indoc::indoc;
+
+    run_test_actions([
+        TestAction::assert_with_op(indoc! {r#" ({ a: 1, b: 2, c: 3 }) "#}, |value, context| {
+            let value = std::collections::BTreeMap::<String, i32>::try_from_js(&value, context);
+
+            match value {
+                Ok(value) => {
+                    value
+                        == vec![
+                            ("a".to_string(), 1),
+                            ("b".to_string(), 2),
+                            ("c".to_string(), 3),
+                        ]
+                        .into_iter()
+                        .collect::<std::collections::BTreeMap<String, i32>>()
+                }
+                _ => false,
+            }
+        }),
+        TestAction::assert_with_op(indoc! {r#" ({ a: 1, b: 2, c: 3 }) "#}, |value, context| {
+            let value = std::collections::HashMap::<String, i32>::try_from_js(&value, context);
+
+            match value {
+                Ok(value) => {
+                    value
+                        == std::collections::HashMap::from_iter(
+                            vec![
+                                ("a".to_string(), 1),
+                                ("b".to_string(), 2),
+                                ("c".to_string(), 3),
+                            ]
+                            .into_iter()
+                            .collect::<std::collections::BTreeMap<String, i32>>(),
+                        )
+                }
+                _ => false,
+            }
+        }),
     ]);
 }

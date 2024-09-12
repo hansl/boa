@@ -8,6 +8,7 @@ use std::{
     ops::Sub,
 };
 
+use boa_macros::js_str;
 use num_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::{ToPrimitive, Zero};
@@ -20,6 +21,14 @@ use boa_profiler::Profiler;
 #[doc(inline)]
 pub use conversions::convert::Convert;
 
+pub(crate) use self::conversions::IntoOrUndefined;
+#[doc(inline)]
+pub use self::{
+    conversions::try_from_js::TryFromJs, display::ValueDisplay, integer::IntegerOrInfinity,
+    operations::*, r#type::Type,
+};
+use crate::builtins::RegExp;
+use crate::object::{JsFunction, JsPromise, JsRegExp};
 use crate::{
     builtins::{
         number::{f64_to_int32, f64_to_uint32},
@@ -31,13 +40,6 @@ use crate::{
     property::{PropertyDescriptor, PropertyKey},
     symbol::JsSymbol,
     Context, JsBigInt, JsResult, JsString,
-};
-
-pub(crate) use self::conversions::IntoOrUndefined;
-#[doc(inline)]
-pub use self::{
-    conversions::try_from_js::TryFromJs, display::ValueDisplay, integer::IntegerOrInfinity,
-    operations::*, r#type::Type,
 };
 
 mod conversions;
@@ -172,6 +174,16 @@ impl JsValue {
         self.as_object().filter(|obj| obj.is_callable())
     }
 
+    /// Returns a [`JsFunction`] if the value is callable, otherwise `None`.
+    /// This is equivalent to `JsFunction::from_object(value.as_callable()?)`.
+    #[inline]
+    #[must_use]
+    pub fn as_function(&self) -> Option<JsFunction> {
+        self.as_callable()
+            .cloned()
+            .and_then(JsFunction::from_object)
+    }
+
     /// Returns true if the value is a constructor object.
     #[inline]
     #[must_use]
@@ -193,11 +205,37 @@ impl JsValue {
         matches!(self, Self::Object(obj) if obj.is::<Promise>())
     }
 
-    /// Returns the promise if the value is a promise, otherwise `None`.
+    /// Returns the value as an object if the value is a promise, otherwise `None`.
     #[inline]
     #[must_use]
-    pub fn as_promise(&self) -> Option<&JsObject> {
+    pub(crate) fn as_promise_object(&self) -> Option<&JsObject> {
         self.as_object().filter(|obj| obj.is::<Promise>())
+    }
+
+    /// Returns the value as a promise if the value is a promise, otherwise `None`.
+    #[inline]
+    #[must_use]
+    pub fn as_promise(&self) -> Option<JsPromise> {
+        self.as_promise_object()
+            .cloned()
+            .and_then(|o| JsPromise::from_object(o).ok())
+    }
+
+    /// Returns true if the value is a regular expression object.
+    #[inline]
+    #[must_use]
+    pub fn is_regexp(&self) -> bool {
+        matches!(self, Self::Object(obj) if obj.is::<RegExp>())
+    }
+
+    /// Returns the value as a regular expression if the value is a regexp, otherwise `None`.
+    #[inline]
+    #[must_use]
+    pub fn as_regexp(&self) -> Option<JsRegExp> {
+        self.as_object()
+            .filter(|obj| obj.is::<RegExp>())
+            .cloned()
+            .and_then(|o| JsRegExp::from_object(o).ok())
     }
 
     /// Returns true if the value is a symbol.
@@ -393,9 +431,9 @@ impl JsValue {
                 //     1. Assert: preferredType is number.
                 //     2. Let hint be "number".
                 let hint = match preferred_type {
-                    PreferredType::Default => js_string!("default"),
-                    PreferredType::String => js_string!("string"),
-                    PreferredType::Number => js_string!("number"),
+                    PreferredType::Default => js_str!("default"),
+                    PreferredType::String => js_str!("string"),
+                    PreferredType::Number => js_str!("number"),
                 }
                 .into();
 
@@ -440,7 +478,7 @@ impl JsValue {
             Self::Undefined => Err(JsNativeError::typ()
                 .with_message("cannot convert undefined to a BigInt")
                 .into()),
-            Self::String(ref string) => string.to_big_int().map_or_else(
+            Self::String(ref string) => JsBigInt::from_js_string(string).map_or_else(
                 || {
                     Err(JsNativeError::syntax()
                         .with_message(format!(
@@ -495,8 +533,8 @@ impl JsValue {
     /// This function is equivalent to `String(value)` in JavaScript.
     pub fn to_string(&self, context: &mut Context) -> JsResult<JsString> {
         match self {
-            Self::Null => Ok("null".into()),
-            Self::Undefined => Ok("undefined".into()),
+            Self::Null => Ok(js_string!("null")),
+            Self::Undefined => Ok(js_string!("undefined")),
             Self::Boolean(boolean) => Ok(boolean.to_string().into()),
             Self::Rational(rational) => Ok(Number::to_js_string(*rational)),
             Self::Integer(integer) => Ok(integer.to_string().into()),
@@ -518,7 +556,6 @@ impl JsValue {
     ///
     /// See: <https://tc39.es/ecma262/#sec-toobject>
     pub fn to_object(&self, context: &mut Context) -> JsResult<JsObject> {
-        // TODO: add fast paths with object template
         match self {
             Self::Undefined | Self::Null => Err(JsNativeError::typ()
                 .with_message("cannot convert 'null' or 'undefined' to object")
@@ -907,6 +944,11 @@ impl JsValue {
         }
     }
 
+    /// Converts a value to a 32 bit floating point.
+    pub fn to_f32(&self, context: &mut Context) -> JsResult<f32> {
+        self.to_number(context).map(|n| n as f32)
+    }
+
     /// This is a more specialized version of `to_numeric`, including `BigInt`.
     ///
     /// This function is equivalent to `Number(value)` in JavaScript
@@ -991,21 +1033,56 @@ impl JsValue {
     #[must_use]
     pub fn js_type_of(&self) -> JsString {
         match *self {
-            Self::Rational(_) | Self::Integer(_) => js_string!("number"),
-            Self::String(_) => js_string!("string"),
-            Self::Boolean(_) => js_string!("boolean"),
-            Self::Symbol(_) => js_string!("symbol"),
-            Self::Null => js_string!("object"),
-            Self::Undefined => js_string!("undefined"),
-            Self::BigInt(_) => js_string!("bigint"),
+            Self::Rational(_) | Self::Integer(_) => js_str!("number"),
+            Self::String(_) => js_str!("string"),
+            Self::Boolean(_) => js_str!("boolean"),
+            Self::Symbol(_) => js_str!("symbol"),
+            Self::Null => js_str!("object"),
+            Self::Undefined => js_str!("undefined"),
+            Self::BigInt(_) => js_str!("bigint"),
             Self::Object(ref object) => {
                 if object.is_callable() {
-                    js_string!("function")
+                    js_str!("function")
                 } else {
-                    js_string!("object")
+                    js_str!("object")
                 }
             }
         }
+        .into()
+    }
+
+    /// Maps a `JsValue` into a `Option<T>` where T is the result of an
+    /// operation on a defined value. If the value is `JsValue::undefined`,
+    /// then `JsValue::map` will return None.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use boa_engine::{JsValue, Context};
+    ///
+    /// let mut context = Context::default();
+    ///
+    /// let defined_value = JsValue::from(5);
+    /// let undefined = JsValue::undefined();
+    ///
+    /// let defined_result = defined_value.map(|v| v.add(&JsValue::from(5), &mut context)).transpose().unwrap();
+    /// let undefined_result = undefined.map(|v| v.add(&JsValue::from(5), &mut context)).transpose().unwrap();
+    ///
+    /// assert_eq!(defined_result, Some(JsValue::Integer(10)));
+    /// assert_eq!(undefined_result, None);
+    ///
+    /// ```
+    ///
+    #[inline]
+    #[must_use]
+    pub fn map<T, F>(&self, f: F) -> Option<T>
+    where
+        F: FnOnce(&JsValue) -> T,
+    {
+        if self.is_undefined() {
+            return None;
+        }
+        Some(f(self))
     }
 
     /// Abstract operation `IsArray ( argument )`
@@ -1050,7 +1127,7 @@ pub enum PreferredType {
 pub enum Numeric {
     /// Double precision floating point number.
     Number(f64),
-    /// BigInt an integer of arbitrary size.
+    /// `BigInt` an integer of arbitrary size.
     BigInt(JsBigInt),
 }
 

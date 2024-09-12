@@ -13,22 +13,20 @@
 //! [mdn]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypedArray
 
 use crate::{
-    builtins::{
-        iterable::iterable_to_list, BuiltInBuilder, BuiltInConstructor, BuiltInObject,
-        IntrinsicObject,
-    },
+    builtins::{BuiltInBuilder, BuiltInConstructor, BuiltInObject, IntrinsicObject},
     context::intrinsics::{Intrinsics, StandardConstructor, StandardConstructors},
     error::JsNativeError,
     js_string,
     object::{internal_methods::get_prototype_from_constructor, JsObject},
     property::Attribute,
     realm::Realm,
-    string::common::StaticJsStrings,
+    string::StaticJsStrings,
     symbol::JsSymbol,
     value::{JsValue, Numeric},
     Context, JsArgs, JsResult, JsString,
 };
 use boa_gc::{Finalize, Trace};
+use boa_macros::js_str;
 use boa_profiler::Profiler;
 
 mod builtin;
@@ -74,13 +72,13 @@ impl<T: TypedArrayMarker> IntrinsicObject for T {
                 Attribute::CONFIGURABLE,
             )
             .property(
-                js_string!("BYTES_PER_ELEMENT"),
-                std::mem::size_of::<T::Element>(),
+                js_str!("BYTES_PER_ELEMENT"),
+                size_of::<T::Element>(),
                 Attribute::READONLY | Attribute::NON_ENUMERABLE | Attribute::PERMANENT,
             )
             .static_property(
-                js_string!("BYTES_PER_ELEMENT"),
-                std::mem::size_of::<T::Element>(),
+                js_str!("BYTES_PER_ELEMENT"),
+                size_of::<T::Element>(),
                 Attribute::READONLY | Attribute::NON_ENUMERABLE | Attribute::PERMANENT,
             )
             .build();
@@ -198,13 +196,14 @@ impl<T: TypedArrayMarker> BuiltInConstructor for T {
         // either a [[TypedArrayName]] or an [[ArrayBufferData]] internal slot.
 
         // 2. Let usingIterator be ? GetMethod(firstArgument, @@iterator).
-
         let using_iterator = first_argument.get_method(JsSymbol::iterator(), context)?;
 
         // 3. If usingIterator is not undefined, then
         if let Some(using_iterator) = using_iterator {
-            // a. Let values be ? IterableToList(firstArgument, usingIterator).
-            let values = iterable_to_list(context, &first_argument.into(), Some(using_iterator))?;
+            // a. Let values be ? IteratorToList(? GetIteratorFromMethod(firstArgument, usingIterator)).
+            let values = JsValue::from(first_argument.clone())
+                .get_iterator_from_method(&using_iterator, context)?
+                .into_list(context)?;
 
             // b. Perform ? InitializeTypedArrayFromList(O, values).
             BuiltinTypedArray::initialize_from_list::<T>(proto, values, context)
@@ -436,14 +435,14 @@ impl TypedArrayKind {
     pub(crate) const fn element_size(self) -> u64 {
         match self {
             TypedArrayKind::Int8 | TypedArrayKind::Uint8 | TypedArrayKind::Uint8Clamped => {
-                std::mem::size_of::<u8>() as u64
+                size_of::<u8>() as u64
             }
-            TypedArrayKind::Int16 | TypedArrayKind::Uint16 => std::mem::size_of::<u16>() as u64,
+            TypedArrayKind::Int16 | TypedArrayKind::Uint16 => size_of::<u16>() as u64,
             TypedArrayKind::Int32 | TypedArrayKind::Uint32 | TypedArrayKind::Float32 => {
-                std::mem::size_of::<u32>() as u64
+                size_of::<u32>() as u64
             }
             TypedArrayKind::BigInt64 | TypedArrayKind::BigUint64 | TypedArrayKind::Float64 => {
-                std::mem::size_of::<u64>() as u64
+                size_of::<u64>() as u64
             }
         }
     }

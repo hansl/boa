@@ -1,5 +1,5 @@
 use crate::{
-    environments::{BindingLocator, Environment},
+    environments::{BindingLocator, BindingLocatorEnvironment, Environment},
     vm::{opcode::Operation, CompletionType},
     Context, JsNativeError, JsResult,
 };
@@ -54,18 +54,16 @@ pub(crate) struct SetName;
 
 impl SetName {
     fn operation(context: &mut Context, index: usize) -> JsResult<CompletionType> {
-        let mut binding_locator = context.vm.frame().code_block.bindings[index].clone();
+        let code_block = context.vm.frame().code_block();
+        let mut binding_locator = code_block.bindings[index].clone();
+        let strict = code_block.strict();
         let value = context.vm.pop();
 
         context.find_runtime_binding(&mut binding_locator)?;
 
         verify_initialized(&binding_locator, context)?;
 
-        context.set_binding(
-            &binding_locator,
-            value,
-            context.vm.frame().code_block.strict(),
-        )?;
+        context.set_binding(&binding_locator, value, strict)?;
 
         Ok(CompletionType::Normal)
     }
@@ -105,9 +103,9 @@ impl Operation for SetNameByLocator {
     const COST: u8 = 4;
 
     fn execute(context: &mut Context) -> JsResult<CompletionType> {
-        let binding_locator = context
-            .vm
-            .frame_mut()
+        let frame = context.vm.frame_mut();
+        let strict = frame.code_block.strict();
+        let binding_locator = frame
             .binding_stack
             .pop()
             .expect("locator should have been popped before");
@@ -115,11 +113,7 @@ impl Operation for SetNameByLocator {
 
         verify_initialized(&binding_locator, context)?;
 
-        context.set_binding(
-            &binding_locator,
-            value,
-            context.vm.frame().code_block.strict(),
-        )?;
+        context.set_binding(&binding_locator, value, strict)?;
 
         Ok(CompletionType::Normal)
     }
@@ -131,15 +125,17 @@ fn verify_initialized(locator: &BindingLocator, context: &mut Context) -> JsResu
         let key = locator.name();
         let strict = context.vm.frame().code_block.strict();
 
-        let message = if locator.is_global() {
-            strict.then(|| {
-                format!(
-                    "cannot assign to uninitialized global property `{}`",
-                    key.to_std_string_escaped()
-                )
-            })
-        } else {
-            match context.environment_expect(locator.environment_index()) {
+        let message = match locator.environment() {
+            BindingLocatorEnvironment::GlobalObject if strict => Some(format!(
+                "cannot assign to uninitialized global property `{}`",
+                key.to_std_string_escaped()
+            )),
+            BindingLocatorEnvironment::GlobalObject => None,
+            BindingLocatorEnvironment::GlobalDeclarative => Some(format!(
+                "cannot assign to uninitialized binding `{}`",
+                key.to_std_string_escaped()
+            )),
+            BindingLocatorEnvironment::Stack(index) => match context.environment_expect(index) {
                 Environment::Declarative(_) => Some(format!(
                     "cannot assign to uninitialized binding `{}`",
                     key.to_std_string_escaped()
@@ -149,7 +145,7 @@ fn verify_initialized(locator: &BindingLocator, context: &mut Context) -> JsResu
                     key.to_std_string_escaped()
                 )),
                 Environment::Object(_) => None,
-            }
+            },
         };
 
         if let Some(message) = message {

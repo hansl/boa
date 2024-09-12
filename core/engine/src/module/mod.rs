@@ -30,23 +30,26 @@ use std::rc::Rc;
 use rustc_hash::FxHashSet;
 
 use boa_engine::js_string;
+use boa_engine::property::PropertyKey;
 use boa_gc::{Finalize, Gc, GcRefCell, Trace};
 use boa_interner::Interner;
 use boa_parser::source::ReadChar;
 use boa_parser::{Parser, Source};
 use boa_profiler::Profiler;
+use boa_string::JsStr;
 pub use loader::*;
 pub use namespace::ModuleNamespace;
 use source::SourceTextModule;
 pub use synthetic::{SyntheticModule, SyntheticModuleInitializer};
 
+use crate::object::TypedJsFunction;
 use crate::{
     builtins,
     builtins::promise::{PromiseCapability, PromiseState},
     environments::DeclarativeEnvironment,
     object::{JsObject, JsPromise},
     realm::Realm,
-    Context, HostDefined, JsError, JsResult, JsString, JsValue, NativeFunction,
+    Context, HostDefined, JsError, JsNativeError, JsResult, JsString, JsValue, NativeFunction,
 };
 
 mod loader;
@@ -159,7 +162,7 @@ impl Module {
         context: &mut Context,
     ) -> JsResult<Self> {
         let _timer = Profiler::global().start_event("Module parsing", "Main");
-        let path = src.path().map(std::path::Path::to_path_buf);
+        let path = src.path().map(Path::to_path_buf);
         let mut parser = Parser::new(src);
         parser.set_identifier(context.next_parser_identifier());
         let module = parser.parse_module(context.interner_mut())?;
@@ -606,6 +609,34 @@ impl Module {
                 ModuleNamespace::create(self.clone(), unambiguous_names, context)
             })
             .clone()
+    }
+
+    /// Get an exported value from the module.
+    #[inline]
+    pub fn get_value<K>(&self, name: K, context: &mut Context) -> JsResult<JsValue>
+    where
+        K: Into<PropertyKey>,
+    {
+        let namespace = self.namespace(context);
+        namespace.get(name, context)
+    }
+
+    /// Get an exported function, typed, from the module.
+    #[inline]
+    pub fn get_typed_fn<A, R>(
+        &self,
+        name: JsStr<'_>,
+        context: &mut Context,
+    ) -> JsResult<TypedJsFunction<A, R>>
+    where
+        A: crate::object::TryIntoJsArguments,
+        R: crate::value::TryFromJs,
+    {
+        let func = self.get_value(name, context)?;
+        let func = func.as_function().ok_or_else(|| {
+            JsNativeError::typ().with_message(format!("{name:?} is not a function"))
+        })?;
+        Ok(func.typed())
     }
 
     /// Returns the path of the module, if it was created from a file or assigned.

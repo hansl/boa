@@ -1,4 +1,4 @@
-use boa_macros::utf16;
+use boa_macros::js_str;
 
 use crate::{
     js_string,
@@ -9,13 +9,15 @@ use crate::{
     },
     property::{Attribute, PropertyDescriptor, PropertyKey},
     realm::Realm,
-    string::common::StaticJsStrings,
+    string::StaticJsStrings,
     JsObject, JsString, JsValue, NativeFunction,
 };
 
 use super::{function::ConstructorKind, BuiltInConstructor, IntrinsicObject};
 
 /// Marker for a constructor function.
+// TODO: Remove this marker and use `Constructor` directly.
+#[allow(dead_code)]
 pub(crate) struct Constructor {
     prototype: JsObject,
     inherits: JsPrototype,
@@ -23,6 +25,8 @@ pub(crate) struct Constructor {
 }
 
 /// Marker for a constructor function without a custom prototype for its instances.
+// TODO: Remove this marker and use `ConstructorNoProto` directly.
+#[allow(dead_code)]
 pub(crate) struct ConstructorNoProto;
 
 /// Marker for an ordinary function.
@@ -115,7 +119,7 @@ impl<S: ApplyToObject + IsConstructor> ApplyToObject for Callable<S> {
                 .configurable(true),
         );
         object.insert(
-            utf16!("name"),
+            js_str!("name"),
             PropertyDescriptor::builder()
                 .value(self.name)
                 .writable(false)
@@ -210,11 +214,10 @@ impl BuiltInConstructorWithPrototype<'_> {
             .length(length)
             .build();
 
-        debug_assert!(self
+        debug_assert!(!self
             .object_property_table
             .map
-            .get(&binding.binding)
-            .is_none());
+            .contains_key(&binding.binding));
         self.object_property_table.insert(
             binding.binding,
             SlotAttributes::WRITABLE | SlotAttributes::CONFIGURABLE,
@@ -231,7 +234,7 @@ impl BuiltInConstructorWithPrototype<'_> {
     {
         let key = key.into();
 
-        debug_assert!(self.object_property_table.map.get(&key).is_none());
+        debug_assert!(!self.object_property_table.map.contains_key(&key));
         self.object_property_table
             .insert(key, SlotAttributes::from_bits_truncate(attribute.bits()));
         self.object_storage.push(value.into());
@@ -256,7 +259,7 @@ impl BuiltInConstructorWithPrototype<'_> {
 
         let key = key.into();
 
-        debug_assert!(self.object_property_table.map.get(&key).is_none());
+        debug_assert!(!self.object_property_table.map.contains_key(&key));
         self.object_property_table.insert(key, attributes);
         self.object_storage.extend([
             get.map(JsValue::new).unwrap_or_default(),
@@ -289,11 +292,10 @@ impl BuiltInConstructorWithPrototype<'_> {
             .length(length)
             .build();
 
-        debug_assert!(self
+        debug_assert!(!self
             .prototype_property_table
             .map
-            .get(&binding.binding)
-            .is_none());
+            .contains_key(&binding.binding));
         self.prototype_property_table.insert(
             binding.binding,
             SlotAttributes::WRITABLE | SlotAttributes::CONFIGURABLE,
@@ -310,7 +312,7 @@ impl BuiltInConstructorWithPrototype<'_> {
     {
         let key = key.into();
 
-        debug_assert!(self.prototype_property_table.map.get(&key).is_none());
+        debug_assert!(!self.prototype_property_table.map.contains_key(&key));
         self.prototype_property_table
             .insert(key, SlotAttributes::from_bits_truncate(attribute.bits()));
         self.prototype_storage.push(value.into());
@@ -335,7 +337,7 @@ impl BuiltInConstructorWithPrototype<'_> {
 
         let key = key.into();
 
-        debug_assert!(self.prototype_property_table.map.get(&key).is_none());
+        debug_assert!(!self.prototype_property_table.map.contains_key(&key));
         self.prototype_property_table.insert(key, attributes);
         self.prototype_storage.extend([
             get.map(JsValue::new).unwrap_or_default(),
@@ -363,8 +365,8 @@ impl BuiltInConstructorWithPrototype<'_> {
         let length = self.length;
         let name = self.name.clone();
         let prototype = self.prototype.clone();
-        self = self.static_property(js_string!("length"), length, Attribute::CONFIGURABLE);
-        self = self.static_property(js_string!("name"), name, Attribute::CONFIGURABLE);
+        self = self.static_property(js_str!("length"), length, Attribute::CONFIGURABLE);
+        self = self.static_property(js_str!("name"), name, Attribute::CONFIGURABLE);
         self = self.static_property(PROTOTYPE, prototype, Attribute::empty());
 
         let attributes = self.attributes;
@@ -411,8 +413,8 @@ impl BuiltInConstructorWithPrototype<'_> {
     pub(crate) fn build_without_prototype(mut self) {
         let length = self.length;
         let name = self.name.clone();
-        self = self.static_property(js_string!("length"), length, Attribute::CONFIGURABLE);
-        self = self.static_property(js_string!("name"), name, Attribute::CONFIGURABLE);
+        self = self.static_property(js_str!("length"), length, Attribute::CONFIGURABLE);
+        self = self.static_property(js_str!("name"), name, Attribute::CONFIGURABLE);
 
         let mut object = self.object.borrow_mut();
         let function = object
@@ -483,7 +485,7 @@ impl<'ctx> BuiltInBuilder<'ctx, OrdinaryObject> {
             realm,
             function,
             length: 0,
-            name: js_string!(""),
+            name: js_string!(),
         }
     }
 
@@ -496,7 +498,7 @@ impl<'ctx> BuiltInBuilder<'ctx, OrdinaryObject> {
             object: I::get(realm.intrinsics()),
             kind: Callable {
                 function,
-                name: js_string!(""),
+                name: js_string!(),
                 length: 0,
                 kind: OrdinaryFunction,
                 realm: realm.clone(),
@@ -515,7 +517,7 @@ impl<'ctx> BuiltInBuilder<'ctx, OrdinaryObject> {
             object,
             kind: Callable {
                 function,
-                name: js_string!(""),
+                name: js_string!(),
                 length: 0,
                 kind: OrdinaryFunction,
                 realm: realm.clone(),

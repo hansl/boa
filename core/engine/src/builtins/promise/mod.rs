@@ -3,7 +3,10 @@
 #[cfg(test)]
 mod tests;
 
-use super::{iterable::IteratorRecord, BuiltInBuilder, BuiltInConstructor, IntrinsicObject};
+use super::{
+    iterable::{IteratorHint, IteratorRecord},
+    BuiltInBuilder, BuiltInConstructor, IntrinsicObject,
+};
 use crate::{
     builtins::{Array, BuiltInObject},
     context::intrinsics::{Intrinsics, StandardConstructor, StandardConstructors},
@@ -17,13 +20,13 @@ use crate::{
     },
     property::Attribute,
     realm::Realm,
-    string::{common::StaticJsStrings, utf16},
+    string::StaticJsStrings,
     symbol::JsSymbol,
     value::JsValue,
     Context, JsArgs, JsError, JsResult, JsString,
 };
 use boa_gc::{custom_trace, Finalize, Gc, GcRefCell, Trace};
-use boa_macros::JsData;
+use boa_macros::{js_str, JsData};
 use boa_profiler::Profiler;
 use std::{cell::Cell, rc::Rc};
 use tap::{Conv, Pipe};
@@ -88,8 +91,8 @@ pub struct Promise {
 /// Per the spec:
 ///
 /// > If operation is "handle", an implementation should not hold a reference to promise in a way
-/// that would interfere with garbage collection. An implementation may hold a reference to promise
-/// if operation is "reject", since it is expected that rejections will be rare and not on hot code paths.
+/// > that would interfere with garbage collection. An implementation may hold a reference to promise
+/// > if operation is "reject", since it is expected that rejections will be rare and not on hot code paths.
 ///
 /// [fn]: https://tc39.es/ecma262/#sec-host-promise-rejection-tracker
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -581,8 +584,10 @@ impl Promise {
         let promise_resolve =
             if_abrupt_reject_promise!(promise_resolve, promise_capability, context);
 
-        // 5. Let iteratorRecord be Completion(GetIterator(iterable)).
-        let iterator_record = args.get_or_undefined(0).get_iterator(context, None, None);
+        // 5. Let iteratorRecord be Completion(GetIterator(iterable, sync)).
+        let iterator_record = args
+            .get_or_undefined(0)
+            .get_iterator(IteratorHint::Sync, context);
 
         // 6. IfAbruptRejectPromise(iteratorRecord, promiseCapability).
         let mut iterator_record =
@@ -649,58 +654,22 @@ impl Promise {
         let mut index = 0;
 
         // 4. Repeat,
-        loop {
-            // a. Let next be Completion(IteratorStep(iteratorRecord)).
-            // b. If next is an abrupt completion, set iteratorRecord.[[Done]] to true.
-            // c. ReturnIfAbrupt(next).
-            let done = iterator_record.step(context)?;
-
-            // d. If next is false, then
-            // i. Set iteratorRecord.[[Done]] to true.
-            if done {
-                // ii. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
-                remaining_elements_count.set(remaining_elements_count.get() - 1);
-
-                // iii. If remainingElementsCount.[[Value]] is 0, then
-                if remaining_elements_count.get() == 0 {
-                    // 1. Let valuesArray be CreateArrayFromList(values).
-                    let values_array = crate::builtins::Array::create_array_from_list(
-                        values.borrow().iter().cloned(),
-                        context,
-                    );
-
-                    // 2. Perform ? Call(resultCapability.[[Resolve]], undefined, « valuesArray »).
-                    result_capability.functions.resolve.call(
-                        &JsValue::undefined(),
-                        &[values_array.into()],
-                        context,
-                    )?;
-                }
-
-                // iv. Return resultCapability.[[Promise]].
-                return Ok(result_capability.promise.clone());
-            }
-
-            // e. Let nextValue be Completion(IteratorValue(next)).
-            // f. If nextValue is an abrupt completion, set iteratorRecord.[[Done]] to true.
-            // g. ReturnIfAbrupt(nextValue).
-            let next_value = iterator_record.value(context)?;
-
-            // h. Append undefined to values.
+        while let Some(next) = iterator_record.step_value(context)? {
+            // c. Append undefined to values.
             values.borrow_mut().push(JsValue::Undefined);
 
-            // i. Let nextPromise be ? Call(promiseResolve, constructor, « nextValue »).
+            // d. Let nextPromise be ? Call(promiseResolve, constructor, « next »).
             let next_promise =
-                promise_resolve.call(&constructor.clone().into(), &[next_value], context)?;
+                promise_resolve.call(&constructor.clone().into(), &[next], context)?;
 
-            // j. Let steps be the algorithm steps defined in Promise.all Resolve Element Functions.
-            // k. Let length be the number of non-optional parameters of the function definition in Promise.all Resolve Element Functions.
-            // l. Let onFulfilled be CreateBuiltinFunction(steps, length, "", « [[AlreadyCalled]], [[Index]], [[Values]], [[Capability]], [[RemainingElements]] »).
-            // m. Set onFulfilled.[[AlreadyCalled]] to false.
-            // n. Set onFulfilled.[[Index]] to index.
-            // o. Set onFulfilled.[[Values]] to values.
-            // p. Set onFulfilled.[[Capability]] to resultCapability.
-            // q. Set onFulfilled.[[RemainingElements]] to remainingElementsCount.
+            // e. Let steps be the algorithm steps defined in Promise.all Resolve Element Functions.
+            // f. Let length be the number of non-optional parameters of the function definition in Promise.all Resolve Element Functions.
+            // g. Let onFulfilled be CreateBuiltinFunction(steps, length, "", « [[AlreadyCalled]], [[Index]], [[Values]], [[Capability]], [[RemainingElements]] »).
+            // h. Set onFulfilled.[[AlreadyCalled]] to false.
+            // i. Set onFulfilled.[[Index]] to index.
+            // j. Set onFulfilled.[[Values]] to values.
+            // k. Set onFulfilled.[[Capability]] to resultCapability.
+            // l. Set onFulfilled.[[RemainingElements]] to remainingElementsCount.
             let on_fulfilled = FunctionObjectBuilder::new(
                 context.realm(),
                 NativeFunction::from_copy_closure_with_captures(
@@ -733,7 +702,7 @@ impl Promise {
                         // 10. If remainingElementsCount.[[Value]] is 0, then
                         if captures.remaining_elements_count.get() == 0 {
                             // a. Let valuesArray be CreateArrayFromList(values).
-                            let values_array = crate::builtins::Array::create_array_from_list(
+                            let values_array = Array::create_array_from_list(
                                 captures.values.borrow().as_slice().iter().cloned(),
                                 context,
                             );
@@ -763,12 +732,12 @@ impl Promise {
             .constructor(false)
             .build();
 
-            // r. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] + 1.
+            // m. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] + 1.
             remaining_elements_count.set(remaining_elements_count.get() + 1);
 
-            // s. Perform ? Invoke(nextPromise, "then", « onFulfilled, resultCapability.[[Reject]] »).
+            // n. Perform ? Invoke(nextPromise, "then", « onFulfilled, resultCapability.[[Reject]] »).
             next_promise.invoke(
-                utf16!("then"),
+                js_str!("then"),
                 &[
                     on_fulfilled.into(),
                     result_capability.functions.reject.clone().into(),
@@ -776,9 +745,30 @@ impl Promise {
                 context,
             )?;
 
-            // t. Set index to index + 1.
+            // o. Set index to index + 1.
             index += 1;
         }
+
+        // b. If next is done, then
+        //     i. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
+        remaining_elements_count.set(remaining_elements_count.get() - 1);
+
+        //     ii. If remainingElementsCount.[[Value]] = 0, then
+        if remaining_elements_count.get() == 0 {
+            // 1. Let valuesArray be CreateArrayFromList(values).
+            let values_array =
+                Array::create_array_from_list(values.borrow().iter().cloned(), context);
+
+            // 2. Perform ? Call(resultCapability.[[Resolve]], undefined, « valuesArray »).
+            result_capability.functions.resolve.call(
+                &JsValue::undefined(),
+                &[values_array.into()],
+                context,
+            )?;
+        }
+
+        //     iii. Return resultCapability.[[Promise]].
+        Ok(result_capability.promise.clone())
     }
 
     /// `Promise.allSettled ( iterable )`
@@ -809,8 +799,10 @@ impl Promise {
         let promise_resolve =
             if_abrupt_reject_promise!(promise_resolve, promise_capability, context);
 
-        // 5. Let iteratorRecord be Completion(GetIterator(iterable)).
-        let iterator_record = args.get_or_undefined(0).get_iterator(context, None, None);
+        // 5. Let iteratorRecord be Completion(GetIterator(iterable, sync)).
+        let iterator_record = args
+            .get_or_undefined(0)
+            .get_iterator(IteratorHint::Sync, context);
 
         // 6. IfAbruptRejectPromise(iteratorRecord, promiseCapability).
         let mut iterator_record =
@@ -877,59 +869,23 @@ impl Promise {
         let mut index = 0;
 
         // 4. Repeat,
-        loop {
-            // a. Let next be Completion(IteratorStep(iteratorRecord)).
-            // b. If next is an abrupt completion, set iteratorRecord.[[Done]] to true.
-            // c. ReturnIfAbrupt(next).
-            let done = iterator_record.step(context)?;
-
-            // d. If next is false, then
-            if done {
-                // i. Set iteratorRecord.[[Done]] to true.
-                // ii. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
-                remaining_elements_count.set(remaining_elements_count.get() - 1);
-
-                // iii. If remainingElementsCount.[[Value]] is 0, then
-                if remaining_elements_count.get() == 0 {
-                    // 1. Let valuesArray be CreateArrayFromList(values).
-                    let values_array = crate::builtins::Array::create_array_from_list(
-                        values.borrow().as_slice().iter().cloned(),
-                        context,
-                    );
-
-                    // 2. Perform ? Call(resultCapability.[[Resolve]], undefined, « valuesArray »).
-                    result_capability.functions.resolve.call(
-                        &JsValue::undefined(),
-                        &[values_array.into()],
-                        context,
-                    )?;
-                }
-
-                // iv. Return resultCapability.[[Promise]].
-                return Ok(result_capability.promise.clone());
-            }
-
-            // e. Let nextValue be Completion(IteratorValue(next)).
-            // f. If nextValue is an abrupt completion, set iteratorRecord.[[Done]] to true.
-            // g. ReturnIfAbrupt(nextValue).
-            let next_value = iterator_record.value(context)?;
-
-            // h. Append undefined to values.
+        while let Some(next) = iterator_record.step_value(context)? {
+            // c. Append undefined to values.
             values.borrow_mut().push(JsValue::undefined());
 
-            // i. Let nextPromise be ? Call(promiseResolve, constructor, « nextValue »).
+            // d. Let nextPromise be ? Call(promiseResolve, constructor, « next »).
             let next_promise =
-                promise_resolve.call(&constructor.clone().into(), &[next_value], context)?;
+                promise_resolve.call(&constructor.clone().into(), &[next], context)?;
 
-            // j. Let stepsFulfilled be the algorithm steps defined in Promise.allSettled Resolve Element Functions.
-            // k. Let lengthFulfilled be the number of non-optional parameters of the function definition in Promise.allSettled Resolve Element Functions.
-            // l. Let onFulfilled be CreateBuiltinFunction(stepsFulfilled, lengthFulfilled, "", « [[AlreadyCalled]], [[Index]], [[Values]], [[Capability]], [[RemainingElements]] »).
-            // m. Let alreadyCalled be the Record { [[Value]]: false }.
-            // n. Set onFulfilled.[[AlreadyCalled]] to alreadyCalled.
-            // o. Set onFulfilled.[[Index]] to index.
-            // p. Set onFulfilled.[[Values]] to values.
-            // q. Set onFulfilled.[[Capability]] to resultCapability.
-            // r. Set onFulfilled.[[RemainingElements]] to remainingElementsCount.
+            // e. Let stepsFulfilled be the algorithm steps defined in Promise.allSettled Resolve Element Functions.
+            // f. Let lengthFulfilled be the number of non-optional parameters of the function definition in Promise.allSettled Resolve Element Functions.
+            // g. Let onFulfilled be CreateBuiltinFunction(stepsFulfilled, lengthFulfilled, "", « [[AlreadyCalled]], [[Index]], [[Values]], [[Capability]], [[RemainingElements]] »).
+            // h. Let alreadyCalled be the Record { [[Value]]: false }.
+            // i. Set onFulfilled.[[AlreadyCalled]] to alreadyCalled.
+            // j. Set onFulfilled.[[Index]] to index.
+            // k. Set onFulfilled.[[Values]] to values.
+            // l. Set onFulfilled.[[Capability]] to resultCapability.
+            // m. Set onFulfilled.[[RemainingElements]] to remainingElementsCount.
             let on_fulfilled = FunctionObjectBuilder::new(
                 context.realm(),
                 NativeFunction::from_copy_closure_with_captures(
@@ -957,15 +913,15 @@ impl Promise {
 
                         // 10. Perform ! CreateDataPropertyOrThrow(obj, "status", "fulfilled").
                         obj.create_data_property_or_throw(
-                            utf16!("status"),
-                            js_string!("fulfilled"),
+                            js_str!("status"),
+                            js_str!("fulfilled"),
                             context,
                         )
                         .expect("cannot fail per spec");
 
                         // 11. Perform ! CreateDataPropertyOrThrow(obj, "value", x).
                         obj.create_data_property_or_throw(
-                            utf16!("value"),
+                            js_str!("value"),
                             args.get_or_undefined(0).clone(),
                             context,
                         )
@@ -1012,14 +968,14 @@ impl Promise {
             .constructor(false)
             .build();
 
-            // s. Let stepsRejected be the algorithm steps defined in Promise.allSettled Reject Element Functions.
-            // t. Let lengthRejected be the number of non-optional parameters of the function definition in Promise.allSettled Reject Element Functions.
-            // u. Let onRejected be CreateBuiltinFunction(stepsRejected, lengthRejected, "", « [[AlreadyCalled]], [[Index]], [[Values]], [[Capability]], [[RemainingElements]] »).
-            // v. Set onRejected.[[AlreadyCalled]] to alreadyCalled.
-            // w. Set onRejected.[[Index]] to index.
-            // x. Set onRejected.[[Values]] to values.
-            // y. Set onRejected.[[Capability]] to resultCapability.
-            // z. Set onRejected.[[RemainingElements]] to remainingElementsCount.
+            // n. Let stepsRejected be the algorithm steps defined in Promise.allSettled Reject Element Functions.
+            // o. Let lengthRejected be the number of non-optional parameters of the function definition in Promise.allSettled Reject Element Functions.
+            // p. Let onRejected be CreateBuiltinFunction(stepsRejected, lengthRejected, "", « [[AlreadyCalled]], [[Index]], [[Values]], [[Capability]], [[RemainingElements]] »).
+            // q. Set onRejected.[[AlreadyCalled]] to alreadyCalled.
+            // r. Set onRejected.[[Index]] to index.
+            // s. Set onRejected.[[Values]] to values.
+            // t. Set onRejected.[[Capability]] to resultCapability.
+            // u. Set onRejected.[[RemainingElements]] to remainingElementsCount.
             let on_rejected = FunctionObjectBuilder::new(
                 context.realm(),
                 NativeFunction::from_copy_closure_with_captures(
@@ -1047,15 +1003,15 @@ impl Promise {
 
                         // 10. Perform ! CreateDataPropertyOrThrow(obj, "status", "rejected").
                         obj.create_data_property_or_throw(
-                            utf16!("status"),
-                            js_string!("rejected"),
+                            js_str!("status"),
+                            js_str!("rejected"),
                             context,
                         )
                         .expect("cannot fail per spec");
 
                         // 11. Perform ! CreateDataPropertyOrThrow(obj, "reason", x).
                         obj.create_data_property_or_throw(
-                            utf16!("reason"),
+                            js_str!("reason"),
                             args.get_or_undefined(0).clone(),
                             context,
                         )
@@ -1102,19 +1058,40 @@ impl Promise {
             .constructor(false)
             .build();
 
-            // aa. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] + 1.
+            // v. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] + 1.
             remaining_elements_count.set(remaining_elements_count.get() + 1);
 
-            // ab. Perform ? Invoke(nextPromise, "then", « onFulfilled, onRejected »).
+            // w. Perform ? Invoke(nextPromise, "then", « onFulfilled, onRejected »).
             next_promise.invoke(
-                utf16!("then"),
+                js_str!("then"),
                 &[on_fulfilled.into(), on_rejected.into()],
                 context,
             )?;
 
-            // ac. Set index to index + 1.
+            // x. Set index to index + 1.
             index += 1;
         }
+
+        // b. If next is done, then
+        //     i. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
+        remaining_elements_count.set(remaining_elements_count.get() - 1);
+
+        //     ii. If remainingElementsCount.[[Value]] = 0, then
+        if remaining_elements_count.get() == 0 {
+            // 1. Let valuesArray be CreateArrayFromList(values).
+            let values_array =
+                Array::create_array_from_list(values.borrow().as_slice().iter().cloned(), context);
+
+            // 2. Perform ? Call(resultCapability.[[Resolve]], undefined, « valuesArray »).
+            result_capability.functions.resolve.call(
+                &JsValue::undefined(),
+                &[values_array.into()],
+                context,
+            )?;
+        }
+
+        //     iii. Return resultCapability.[[Promise]].
+        Ok(result_capability.promise.clone())
     }
 
     /// `Promise.any ( iterable )`
@@ -1145,8 +1122,10 @@ impl Promise {
         let promise_resolve =
             if_abrupt_reject_promise!(promise_resolve, promise_capability, context);
 
-        // 5. Let iteratorRecord be Completion(GetIterator(iterable)).
-        let iterator_record = args.get_or_undefined(0).get_iterator(context, None, None);
+        // 5. Let iteratorRecord be Completion(GetIterator(iterable, sync)).
+        let iterator_record = args
+            .get_or_undefined(0)
+            .get_iterator(IteratorHint::Sync, context);
 
         // 6. IfAbruptRejectPromise(iteratorRecord, promiseCapability).
         let mut iterator_record =
@@ -1213,61 +1192,23 @@ impl Promise {
         let mut index = 0;
 
         // 4. Repeat,
-        loop {
-            // a. Let next be Completion(IteratorStep(iteratorRecord)).
-            // b. If next is an abrupt completion, set iteratorRecord.[[Done]] to true.
-            // c. ReturnIfAbrupt(next).
-            let done = iterator_record.step(context)?;
-
-            // d. If next is false, then
-            if done {
-                // i. Set iteratorRecord.[[Done]] to true.
-
-                // ii. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
-                remaining_elements_count.set(remaining_elements_count.get() - 1);
-
-                // iii. If remainingElementsCount.[[Value]] is 0, then
-                if remaining_elements_count.get() == 0 {
-                    // 1. Let error be a newly created AggregateError object.
-                    // 2. Perform ! DefinePropertyOrThrow(error, "errors", PropertyDescriptor { [[Configurable]]: true, [[Enumerable]]: false, [[Writable]]: true, [[Value]]: CreateArrayFromList(errors) }).
-                    let error = JsNativeError::aggregate(
-                        errors
-                            .borrow()
-                            .iter()
-                            .cloned()
-                            .map(JsError::from_opaque)
-                            .collect(),
-                    )
-                    .with_message("no promise in Promise.any was fulfilled.");
-
-                    // 3. Return ThrowCompletion(error).
-                    return Err(error.into());
-                }
-
-                // iv. Return resultCapability.[[Promise]].
-                return Ok(result_capability.promise.clone());
-            }
-
-            // e. Let nextValue be Completion(IteratorValue(next)).
-            // f. If nextValue is an abrupt completion, set iteratorRecord.[[Done]] to true.
-            // g. ReturnIfAbrupt(nextValue).
-            let next_value = iterator_record.value(context)?;
-
-            // h. Append undefined to errors.
+        //     a. Let next be ? IteratorStepValue(iteratorRecord).
+        while let Some(next) = iterator_record.step_value(context)? {
+            // c. Append undefined to errors.
             errors.borrow_mut().push(JsValue::undefined());
 
-            // i. Let nextPromise be ? Call(promiseResolve, constructor, « nextValue »).
+            // d. Let nextPromise be ? Call(promiseResolve, constructor, « next »).
             let next_promise =
-                promise_resolve.call(&constructor.clone().into(), &[next_value], context)?;
+                promise_resolve.call(&constructor.clone().into(), &[next], context)?;
 
-            // j. Let stepsRejected be the algorithm steps defined in Promise.any Reject Element Functions.
-            // k. Let lengthRejected be the number of non-optional parameters of the function definition in Promise.any Reject Element Functions.
-            // l. Let onRejected be CreateBuiltinFunction(stepsRejected, lengthRejected, "", « [[AlreadyCalled]], [[Index]], [[Errors]], [[Capability]], [[RemainingElements]] »).
-            // m. Set onRejected.[[AlreadyCalled]] to false.
-            // n. Set onRejected.[[Index]] to index.
-            // o. Set onRejected.[[Errors]] to errors.
-            // p. Set onRejected.[[Capability]] to resultCapability.
-            // q. Set onRejected.[[RemainingElements]] to remainingElementsCount.
+            // e. Let stepsRejected be the algorithm steps defined in Promise.any Reject Element Functions.
+            // f. Let lengthRejected be the number of non-optional parameters of the function definition in Promise.any Reject Element Functions.
+            // g. Let onRejected be CreateBuiltinFunction(stepsRejected, lengthRejected, "", « [[AlreadyCalled]], [[Index]], [[Errors]], [[Capability]], [[RemainingElements]] »).
+            // h. Set onRejected.[[AlreadyCalled]] to false.
+            // i. Set onRejected.[[Index]] to index.
+            // j. Set onRejected.[[Errors]] to errors.
+            // k. Set onRejected.[[Capability]] to resultCapability.
+            // l. Set onRejected.[[RemainingElements]] to remainingElementsCount.
             let on_rejected = FunctionObjectBuilder::new(
                 context.realm(),
                 NativeFunction::from_copy_closure_with_captures(
@@ -1338,12 +1279,12 @@ impl Promise {
             .constructor(false)
             .build();
 
-            // r. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] + 1.
+            // m. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] + 1.
             remaining_elements_count.set(remaining_elements_count.get() + 1);
 
-            // s. Perform ? Invoke(nextPromise, "then", « resultCapability.[[Resolve]], onRejected »).
+            // n. Perform ? Invoke(nextPromise, "then", « resultCapability.[[Resolve]], onRejected »).
             next_promise.invoke(
-                utf16!("then"),
+                js_str!("then"),
                 &[
                     result_capability.functions.resolve.clone().into(),
                     on_rejected.into(),
@@ -1351,9 +1292,33 @@ impl Promise {
                 context,
             )?;
 
-            // t. Set index to index + 1.
+            // o. Set index to index + 1.
             index += 1;
         }
+
+        //     b. If next is done, then
+        //         i. Set remainingElementsCount.[[Value]] to remainingElementsCount.[[Value]] - 1.
+        remaining_elements_count.set(remaining_elements_count.get() - 1);
+        //         ii. If remainingElementsCount.[[Value]] = 0, then
+        if remaining_elements_count.get() == 0 {
+            // 1. Let error be a newly created AggregateError object.
+            let error = JsNativeError::aggregate(
+                errors
+                    .borrow()
+                    .iter()
+                    .cloned()
+                    .map(JsError::from_opaque)
+                    .collect(),
+            )
+            .with_message("no promise in Promise.any was fulfilled.");
+
+            // 2. Perform ! DefinePropertyOrThrow(error, "errors", PropertyDescriptor { [[Configurable]]: true, [[Enumerable]]: false, [[Writable]]: true, [[Value]]: CreateArrayFromList(errors) }).
+            // 3. Return ThrowCompletion(error).
+            return Err(error.into());
+        }
+
+        //         iii. Return resultCapability.[[Promise]].
+        Ok(result_capability.promise.clone())
     }
 
     /// `Promise.race ( iterable )`
@@ -1389,8 +1354,8 @@ impl Promise {
         let promise_resolve =
             if_abrupt_reject_promise!(promise_resolve, promise_capability, context);
 
-        // 5. Let iteratorRecord be Completion(GetIterator(iterable)).
-        let iterator_record = iterable.get_iterator(context, None, None);
+        // 5. Let iteratorRecord be Completion(GetIterator(iterable, sync)).
+        let iterator_record = iterable.get_iterator(IteratorHint::Sync, context);
 
         // 6. IfAbruptRejectPromise(iteratorRecord, promiseCapability).
         let mut iterator_record =
@@ -1442,31 +1407,15 @@ impl Promise {
         context: &mut Context,
     ) -> JsResult<JsObject> {
         let constructor = constructor.clone().into();
+
         // 1. Repeat,
-        loop {
-            // a. Let next be Completion(IteratorStep(iteratorRecord)).
-            // b. If next is an abrupt completion, set iteratorRecord.[[Done]] to true.
-            // c. ReturnIfAbrupt(next).
-            let done = iterator_record.step(context)?;
-
-            if done {
-                // d. If next is false, then
-                // i. Set iteratorRecord.[[Done]] to true.
-                // ii. Return resultCapability.[[Promise]].
-                return Ok(result_capability.promise.clone());
-            }
-
-            // e. Let nextValue be Completion(IteratorValue(next)).
-            // f. If nextValue is an abrupt completion, set iteratorRecord.[[Done]] to true.
-            // g. ReturnIfAbrupt(nextValue).
-            let next_value = iterator_record.value(context)?;
-
-            // h. Let nextPromise be ? Call(promiseResolve, constructor, « nextValue »).
-            let next_promise = promise_resolve.call(&constructor, &[next_value], context)?;
-
-            // i. Perform ? Invoke(nextPromise, "then", « resultCapability.[[Resolve]], resultCapability.[[Reject]] »).
+        //     a. Let next be ? IteratorStepValue(iteratorRecord).
+        while let Some(next) = iterator_record.step_value(context)? {
+            // c. Let nextPromise be ? Call(promiseResolve, constructor, « next »).
+            let next_promise = promise_resolve.call(&constructor, &[next], context)?;
+            // d. Perform ? Invoke(nextPromise, "then", « resultCapability.[[Resolve]], resultCapability.[[Reject]] »).
             next_promise.invoke(
-                utf16!("then"),
+                js_str!("then"),
                 &[
                     result_capability.functions.resolve.clone().into(),
                     result_capability.functions.reject.clone().into(),
@@ -1474,6 +1423,10 @@ impl Promise {
                 context,
             )?;
         }
+
+        //     b. If next is done, then
+        //         i. Return resultCapability.[[Promise]].
+        Ok(result_capability.promise.clone())
     }
 
     /// `Promise.reject ( r )`
@@ -1561,7 +1514,7 @@ impl Promise {
         context: &mut Context,
     ) -> JsResult<JsObject> {
         // 1. If IsPromise(x) is true, then
-        if let Some(x) = x.as_promise() {
+        if let Some(x) = x.as_promise_object() {
             // a. Let xConstructor be ? Get(x, "constructor").
             let x_constructor = x.get(CONSTRUCTOR, context)?;
             // b. If SameValue(xConstructor, C) is true, return x.
@@ -1621,7 +1574,7 @@ impl Promise {
         let promise = this;
         // 2. Return ? Invoke(promise, "then", « undefined, onRejected »).
         promise.invoke(
-            utf16!("then"),
+            js_str!("then"),
             &[JsValue::undefined(), on_rejected.clone()],
             context,
         )
@@ -1667,7 +1620,7 @@ impl Promise {
             //    a. Let thenFinally be onFinally.
             //    b. Let catchFinally be onFinally.
             // 7. Return ? Invoke(promise, "then", « thenFinally, catchFinally »).
-            let then = promise.get(utf16!("then"), context)?;
+            let then = promise.get(js_str!("then"), context)?;
             return then.call(this, &[on_finally.clone(), on_finally.clone()], context);
         };
 
@@ -1675,7 +1628,7 @@ impl Promise {
             Self::then_catch_finally_closures(c, on_finally, context);
 
         // 7. Return ? Invoke(promise, "then", « thenFinally, catchFinally »).
-        let then = promise.get(utf16!("then"), context)?;
+        let then = promise.get(js_str!("then"), context)?;
         then.call(this, &[then_finally.into(), catch_finally.into()], context)
     }
 
@@ -1730,7 +1683,7 @@ impl Promise {
                     let value_thunk = return_value.length(0).name("").build();
 
                     // v. Return ? Invoke(promise, "then", « valueThunk »).
-                    promise.invoke(utf16!("then"), &[value_thunk.into()], context)
+                    promise.invoke(js_str!("then"), &[value_thunk.into()], context)
                 },
                 FinallyCaptures {
                     on_finally: on_finally.clone(),
@@ -1781,7 +1734,7 @@ impl Promise {
                     let thrower = throw_reason.length(0).name("").build();
 
                     // v. Return ? Invoke(promise, "then", « thrower »).
-                    promise.invoke(utf16!("then"), &[thrower.into()], context)
+                    promise.invoke(js_str!("then"), &[thrower.into()], context)
                 },
                 FinallyCaptures { on_finally, c },
             ),
@@ -1810,7 +1763,7 @@ impl Promise {
         let promise = this;
 
         // 2. If IsPromise(promise) is false, throw a TypeError exception.
-        let promise = promise.as_promise().ok_or_else(|| {
+        let promise = promise.as_promise_object().ok_or_else(|| {
             JsNativeError::typ().with_message("Promise.prototype.then: this is not a promise")
         })?;
 
@@ -1986,7 +1939,7 @@ impl Promise {
         context: &mut Context,
     ) -> JsResult<JsObject> {
         // 1. Let promiseResolve be ? Get(promiseConstructor, "resolve").
-        let promise_resolve = promise_constructor.get(utf16!("resolve"), context)?;
+        let promise_resolve = promise_constructor.get(js_str!("resolve"), context)?;
 
         // 2. If IsCallable(promiseResolve) is false, throw a TypeError exception.
         promise_resolve.as_callable().cloned().ok_or_else(|| {
@@ -2184,7 +2137,7 @@ impl Promise {
                     };
 
                     // 9. Let then be Completion(Get(resolution, "then")).
-                    let then_action = match then.get(utf16!("then"), context) {
+                    let then_action = match then.get(js_str!("then"), context) {
                         // 10. If then is an abrupt completion, then
                         Err(e) => {
                             //   a. Perform RejectPromise(promise, then.[[Value]]).

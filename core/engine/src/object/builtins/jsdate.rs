@@ -1,10 +1,7 @@
 //! A Rust API wrapper for Boa's `Date` ECMAScript Builtin Object.
 
 use crate::{
-    builtins::Date,
-    object::{JsObject, JsObjectType},
-    value::TryFromJs,
-    Context, JsNativeError, JsResult, JsValue,
+    builtins::Date, object::JsObject, value::TryFromJs, Context, JsNativeError, JsResult, JsValue,
 };
 use boa_gc::{Finalize, Trace};
 use std::ops::Deref;
@@ -17,9 +14,7 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 /// Create a `JsDate` object and set date to December 4 1995
 ///
 /// ```
-/// use boa_engine::{
-///     js_string, object::builtins::JsDate, Context, JsResult, JsValue,
-/// };
+/// use boa_engine::{js_str, object::builtins::JsDate, Context, JsResult, JsValue};
 ///
 /// fn main() -> JsResult<()> {
 ///     // JS mutable Context
@@ -31,7 +26,7 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 ///
 ///     assert_eq!(
 ///         date.to_date_string(context)?,
-///         JsValue::from(js_string!("Mon Dec 04 1995"))
+///         JsValue::from(js_str!("Mon Dec 04 1995"))
 ///     );
 ///
 ///     Ok(())
@@ -586,8 +581,6 @@ impl Deref for JsDate {
         &self.inner
     }
 }
-
-impl JsObjectType for JsDate {}
 
 impl TryFromJs for JsDate {
     fn try_from_js(value: &JsValue, _context: &mut Context) -> JsResult<Self> {

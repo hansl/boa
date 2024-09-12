@@ -36,30 +36,40 @@ impl Operation for AsyncGeneratorYield {
     const COST: u8 = 8;
 
     fn execute(context: &mut Context) -> JsResult<CompletionType> {
-        let value = context.vm.pop();
+        // AsyncGeneratorYield ( value )
+        // https://tc39.es/ecma262/#sec-asyncgeneratoryield
 
+        // 1. Let genContext be the running execution context.
+        // 2. Assert: genContext is the execution context of a generator.
+        // 3. Let generator be the value of the Generator component of genContext.
+        // 4. Assert: GetGeneratorKind() is async.
         let async_generator_object = context
             .vm
             .frame()
             .async_generator_object(&context.vm.stack)
             .expect("`AsyncGeneratorYield` must only be called inside async generators");
-        let completion = Ok(value);
-        let next = async_generator_object
-            .downcast_mut::<AsyncGenerator>()
-            .expect("must be async generator object")
-            .queue
-            .pop_front()
-            .expect("must have item in queue");
-
-        // TODO: 7. Let previousContext be the second to top element of the execution context stack.
-        AsyncGenerator::complete_step(&next, completion, false, None, context);
-
-        let mut generator_object_mut = async_generator_object.borrow_mut();
-        let gen = generator_object_mut
-            .downcast_mut::<AsyncGenerator>()
+        let async_generator_object = async_generator_object
+            .downcast::<AsyncGenerator>()
             .expect("must be async generator object");
 
-        if let Some(next) = gen.queue.front() {
+        // 5. Let completion be NormalCompletion(value).
+        let value = context.vm.pop();
+        let completion = Ok(value);
+
+        // TODO: 6. Assert: The execution context stack has at least two elements.
+        // TODO: 7. Let previousContext be the second to top element of the execution context stack.
+        // TODO: 8. Let previousRealm be previousContext's Realm.
+        // 9. Perform AsyncGeneratorCompleteStep(generator, completion, false, previousRealm).
+        AsyncGenerator::complete_step(&async_generator_object, completion, false, None, context);
+
+        let mut gen = async_generator_object.borrow_mut();
+
+        // 10. Let queue be generator.[[AsyncGeneratorQueue]].
+        // 11. If queue is not empty, then
+        //     a. NOTE: Execution continues without suspending the generator.
+        //     b. Let toYield be the first element of queue.
+        if let Some(next) = gen.data.queue.front() {
+            // c. Let resumptionValue be Completion(toYield.[[Completion]]).
             let resume_kind = match next.completion.clone() {
                 CompletionRecord::Normal(val) => {
                     context.vm.push(val);
@@ -78,10 +88,20 @@ impl Operation for AsyncGeneratorYield {
 
             context.vm.push(resume_kind);
 
+            // d. Return ? AsyncGeneratorUnwrapYieldResumption(resumptionValue).
             return Ok(CompletionType::Normal);
         }
 
-        gen.state = AsyncGeneratorState::SuspendedYield;
+        // 12. Else,
+
+        //     a. Set generator.[[AsyncGeneratorState]] to suspended-yield.
+        gen.data.state = AsyncGeneratorState::SuspendedYield;
+
+        //     TODO: b. Remove genContext from the execution context stack and restore the execution context that is at the top of the execution context stack as the running execution context.
+        //     TODO: c. Let callerContext be the running execution context.
+        //     d. Resume callerContext passing undefined. If genContext is ever resumed again, let resumptionValue be the Completion Record with which it is resumed.
+        //     e. Assert: If control reaches here, then genContext is the running execution context again.
+        //     f. Return ? AsyncGeneratorUnwrapYieldResumption(resumptionValue).
         context.vm.set_return_value(JsValue::undefined());
         Ok(CompletionType::Yield)
     }

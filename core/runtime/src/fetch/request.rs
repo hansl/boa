@@ -67,7 +67,7 @@ impl RequestInit {
             }
         }
 
-        if let Some(Convert(method)) = self.method.take() {
+        if let Some(Convert(ref method)) = self.method.take() {
             builder = builder.method(method.to_std_string().map_err(
                 |_| js_error!(TypeError: "Requestion constructor: {} is an invalid method", method.to_std_string_escaped()),
             )?.as_str())
@@ -94,6 +94,11 @@ impl JsRequest {
     fn into_inner(mut self) -> HttpRequest<()> {
         let inner = mem::replace(&mut self.inner, HttpRequest::new(()));
         inner
+    }
+
+    /// Get the URI of the request.
+    pub fn uri(&self) -> &http::Uri {
+        self.inner.uri()
     }
 
     /// Create a [`JsRequest`] instance from JavaScript arguments, similar to

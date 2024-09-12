@@ -14,8 +14,7 @@ use crate::request::JsRequest;
 use boa_engine::object::builtins::JsPromise;
 use boa_engine::property::Attribute;
 use boa_engine::realm::Realm;
-use boa_engine::{js_string, Context, Finalize, JsData, JsResult, NativeObject};
-use boa_gc::Trace;
+use boa_engine::{js_string, Context, JsResult, NativeObject};
 use boa_interop::IntoJsFunctionCopied;
 use http::{Request as HttpRequest, Response as HttpResponse};
 
@@ -37,7 +36,7 @@ pub trait Fetcher<Body>: NativeObject + Sized {
 }
 
 /// The `fetch` function.
-pub fn fetch<Body, T: Fetcher<Body>>(context: &mut Context) -> JsPromise {
+pub fn fetch<Body, T: Fetcher<Body>>(_context: &mut Context) -> JsPromise {
     todo!()
 }
 

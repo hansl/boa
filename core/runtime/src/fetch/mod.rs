@@ -14,10 +14,12 @@ use crate::request::{JsRequest, RequestInit};
 use boa_engine::object::builtins::JsPromise;
 use boa_engine::property::Attribute;
 use boa_engine::realm::Realm;
-use boa_engine::{js_error, js_string, Context, JsObject, JsResult, JsString, NativeObject};
+use boa_engine::{
+    js_error, js_string, Context, JsError, JsObject, JsResult, JsString, NativeObject,
+};
 use boa_interop::IntoJsFunctionCopied;
 use either::Either;
-use http::{Request as HttpRequest, Response as HttpResponse};
+use http::{Request as HttpRequest, Request, Response as HttpResponse};
 
 pub mod headers;
 pub mod request;
@@ -42,16 +44,33 @@ pub fn fetch<T: Fetcher>(
     resource: Either<JsString, JsObject>,
     options: Option<RequestInit>,
     context: &mut Context,
-) -> JsPromise {
+) -> JsResult<JsPromise> {
     let Some(fetcher) = context.get_data::<T>() else {
-        return JsPromise::reject(
+        return Err(
             js_error!(Error: "implementation of fetch requires a fetcher registered in the context"),
-            context,
         );
     };
 
     // The resource parsing is complicated, so we parse it in Rust here (instead of relying on
     // `TryFromJs` and friends).
+    let request: Request<Vec<u8>> = match resource {
+        Either::Left(url) => {
+            let url = url.to_std_string().map_err(JsError::from_rust)?;
+            let request = HttpRequest::get(url)
+                .body(Vec::new())
+                .map_err(JsError::from_rust)?;
+            request
+        }
+        Either::Right(request) => {
+            // This can be a [`JsRequest`] object.
+            if let Ok(request) = request.downcast::<JsRequest>() {
+                request.borrow().data().inner().clone().map(|_| Vec::new())
+            } else {
+                return Err(js_error!(TypeError: "resource must be a URL or Request object"));
+            }
+        }
+    };
+    let request = request.map()
 
     let response = fetcher.fetch_blocking(&request, context);
     todo!()

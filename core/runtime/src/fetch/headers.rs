@@ -1,13 +1,17 @@
 //! The [`Headers`] JavaScript class.
 //!
 //! See <https://developer.mozilla.org/en-US/docs/Web/API/Headers>.
-use boa_engine::object::builtins::{JsArray, JsFunction};
+use boa_engine::object::builtins::{JsArray, JsFunction, TypedJsFunction};
 use boa_engine::value::Convert;
-use boa_engine::{js_error, Context, Finalize, JsData, JsResult, JsString, JsValue, Trace};
+use boa_engine::{
+    js_error, Context, Finalize, JsData, JsObject, JsResult, JsString, JsValue, Trace,
+};
 use boa_interop::{js_class, JsClass};
 use http::header::HeaderMap as HttpHeaderMap;
 use http::{HeaderName, HeaderValue};
 use std::str::FromStr;
+
+pub type ForEachCallback = TypedJsFunction<(JsString, JsString, JsObject), JsResult<()>>;
 
 /// Converts a JavaScript string to a valid header name (or error).
 ///
@@ -80,6 +84,22 @@ impl JsHeaders {
         )
         .into()
     }
+
+    /// Executes a provided function once for each key/value pair in the Headers object.
+    pub fn for_each(
+        &self,
+        callback: ForEachCallback,
+        this_arg: Option<JsValue>,
+        object: JsObject,
+        context: &mut Context,
+    ) -> JsResult<()> {
+        for (k, v) in self.headers.iter() {
+            let k: JsValue = JsString::from(k.as_str()).into();
+            let v: JsValue = JsString::from(v.to_str().unwrap_or("")).into();
+            callback.call(context, this_arg, &[v, k, object])?;
+        }
+        Ok(())
+    }
 }
 
 js_class! {
@@ -114,10 +134,10 @@ js_class! {
 
         fn forEach(
             this: JsClass<JsHeaders>,
-            callback: JsFunction,
+            callback: ForEachCallback,
             this_arg: Option<JsValue>,
         ) -> JsResult<()> {
-            unimplemented!("Headers.prototype.forEach")
+            this.borrow().for_each(callback, this_arg, &this.inner())
         }
 
         fn get(

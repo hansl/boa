@@ -29,7 +29,7 @@ impl RequestInit {
     fn into_request_builder(
         mut self,
         maybe_request: Option<HttpRequest<()>>,
-    ) -> JsResult<(Option<JsValue>, http::request::Builder)> {
+    ) -> JsResult<(Option<JsValue>, HttpRequest<()>)> {
         let mut builder = HttpRequest::builder();
         if let Some(r) = maybe_request {
             let (parts, _body) = r.into_parts();
@@ -73,7 +73,12 @@ impl RequestInit {
             )?.as_str())
         }
 
-        Ok((self.body.take(), builder))
+        Ok((
+            self.body.take(),
+            builder
+                .body(())
+                .map_err(|_| js_error!(Error: "Cannot construct request"))?,
+        ))
     }
 }
 
@@ -85,15 +90,18 @@ impl RequestInit {
 #[derive(Debug, Clone, JsData, Trace, Finalize)]
 pub struct JsRequest {
     #[unsafe_ignore_trace]
-    inner: HttpRequest<()>,
-    body: Option<JsValue>,
+    inner: HttpRequest<Option<Vec<u8>>>,
 }
 
 impl JsRequest {
     /// Get the inner `http::Request` object. This drops the body (if any).
-    fn into_inner(mut self) -> HttpRequest<()> {
-        let inner = mem::replace(&mut self.inner, HttpRequest::new(()));
+    pub fn into_inner(mut self) -> HttpRequest<Option<Vec<u8>>> {
+        let inner = mem::replace(&mut self.inner, HttpRequest::new(None));
         inner
+    }
+
+    pub fn inner(&self) -> &HttpRequest<Option<Vec<u8>>> {
+        &self.inner
     }
 
     /// Get the URI of the request.
@@ -123,13 +131,8 @@ impl JsRequest {
         };
 
         if let Some(options) = options {
-            let (body, builder) = options.into_request_builder(Some(request))?;
-            Ok(Self {
-                inner: builder
-                    .body(())
-                    .map_err(|_| js_error!(Error: "Cannot construct request"))?,
-                body,
-            })
+            let (body, inner) = options.into_request_builder(Some(request))?;
+            Ok(Self { inner, body })
         } else {
             Ok(Self {
                 inner: request,

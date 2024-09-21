@@ -4,7 +4,8 @@ use boa_engine::module::SyntheticModuleInitializer;
 use boa_engine::object::Object;
 use boa_engine::value::TryFromJs;
 use boa_engine::{
-    Context, JsNativeError, JsResult, JsString, JsValue, Module, NativeFunction, NativeObject,
+    Context, JsNativeError, JsObject, JsResult, JsString, JsValue, Module, NativeFunction,
+    NativeObject,
 };
 use std::ops::Deref;
 
@@ -362,10 +363,16 @@ impl<T: TryFromJs> Deref for JsThis<T> {
 /// [`JsThis`] capture instead.
 #[derive(Debug, Clone)]
 pub struct JsClass<T: NativeObject> {
-    inner: boa_engine::JsObject<T>,
+    inner: JsObject<T>,
 }
 
 impl<T: NativeObject> JsClass<T> {
+    /// Returns a reference to inner.
+    #[must_use]
+    pub fn inner(&self) -> &JsObject<T> {
+        &self.inner
+    }
+
     /// Borrow a reference to the class instance of type `T`.
     ///
     /// # Panics

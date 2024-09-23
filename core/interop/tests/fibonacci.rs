@@ -18,13 +18,10 @@ fn fibonacci(
     if a <= 1 {
         Ok(a)
     } else {
-        Ok(cb_a.call(
-            context,
-            (a - 1, cb_b.to_js_function(), cb_a.to_js_function()),
-        )? + cb_b.call(
-            context,
-            (a - 2, cb_b.to_js_function(), cb_a.to_js_function()),
-        )?)
+        Ok(
+            cb_a.call(context, (a - 1, cb_b.clone().into(), cb_a.clone().into()))?
+                + cb_b.call(context, (a - 2, cb_b.clone().into(), cb_a.clone().into()))?,
+        )
     }
 }
 
@@ -70,7 +67,11 @@ fn fibonacci_test() {
         fibonacci_js
             .call(
                 context,
-                (10, fibonacci_rust.clone(), fibonacci_js.to_js_function())
+                (
+                    10,
+                    fibonacci_rust.clone(),
+                    fibonacci_js.as_js_function().clone()
+                )
             )
             .unwrap(),
         55
@@ -83,7 +84,11 @@ fn fibonacci_test() {
         fibonacci_js
             .call(
                 context,
-                (10, fibonacci_throw.clone(), fibonacci_js.to_js_function())
+                (
+                    10,
+                    fibonacci_throw.clone(),
+                    fibonacci_js.as_js_function().clone()
+                )
             )
             .unwrap_err()
             .to_string(),

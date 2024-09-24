@@ -32,25 +32,25 @@ pub trait Logger: Trace + Sized {
     ///
     /// # Errors
     /// Returning an error will throw an exception in JavaScript.
-    fn log(&self, msg: String, state: &ConsoleState) -> JsResult<()>;
+    fn log(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()>;
 
     /// Log an info message (`console.info`).
     ///
     /// # Errors
     /// Returning an error will throw an exception in JavaScript.
-    fn info(&self, msg: String, state: &ConsoleState) -> JsResult<()>;
+    fn info(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()>;
 
     /// Log a warning message (`console.warn`).
     ///
     /// # Errors
     /// Returning an error will throw an exception in JavaScript.
-    fn warn(&self, msg: String, state: &ConsoleState) -> JsResult<()>;
+    fn warn(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()>;
 
     /// Log an error message (`console.error`).
     ///
     /// # Errors
     /// Returning an error will throw an exception in JavaScript.
-    fn error(&self, msg: String, state: &ConsoleState) -> JsResult<()>;
+    fn error(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()>;
 }
 
 /// The default implementation for logging from the console.
@@ -63,24 +63,24 @@ struct DefaultLogger;
 
 impl Logger for DefaultLogger {
     #[inline]
-    fn log(&self, msg: String, state: &Console) -> JsResult<()> {
-        let indent = 2 * state.groups.len();
+    fn log(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()> {
+        let indent = state.indent();
         writeln!(std::io::stdout(), "{msg:>indent$}").map_err(JsError::from_rust)
     }
 
     #[inline]
-    fn info(&self, msg: String, state: &Console) -> JsResult<()> {
+    fn info(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()> {
         self.log(msg, state)
     }
 
     #[inline]
-    fn warn(&self, msg: String, state: &Console) -> JsResult<()> {
+    fn warn(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()> {
         self.log(msg, state)
     }
 
     #[inline]
-    fn error(&self, msg: String, state: &Console) -> JsResult<()> {
-        let indent = 2 * state.groups.len();
+    fn error(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()> {
+        let indent = state.indent();
         writeln!(std::io::stderr(), "{msg:>indent$}").map_err(JsError::from_rust)
     }
 }
@@ -187,25 +187,35 @@ pub struct ConsoleState<'a> {
     context: &'a mut Context,
 }
 
-impl ConsoleState {
-    pub(crate) fn new(console: &Console, context: &mut Context) -> Self {
+impl<'a> ConsoleState<'a> {
+    /// Create a new console state.
+    pub(crate) fn new(console: &'a Console, context: &'a mut Context) -> Self {
         Self { console, context }
     }
 
+    /// Returns the indentation level that should be applied to logging.
     pub fn indent(&self) -> usize {
         2 * self.console.groups.len()
     }
 
+    /// Returns the current list of groups.
     pub fn groups(&self) -> &Vec<String> {
         &self.console.groups
     }
 
+    /// Returns the count map.
     pub fn count_map(&self) -> &FxHashMap<JsString, u32> {
         &self.console.count_map
     }
 
+    /// Returns the timer map.
     pub fn timer_map(&self) -> &FxHashMap<JsString, u128> {
         &self.console.timer_map
+    }
+
+    /// Returns the boa execution context.
+    pub fn context(&mut self) -> &mut Context {
+        self.context
     }
 }
 
@@ -737,22 +747,19 @@ impl Console {
             None => "default".into(),
         };
 
-        console.timer_map.get(&label).map_or_else(
-            || {
-                logger.warn(
-                    format!("Timer '{}' doesn't exist", label.to_std_string_escaped()),
-                    &ConsoleState::new(console, context),
-                )
-            },
-            |t| {
-                let time = Self::system_time_in_ms();
-                let mut concat = format!("{}: {} ms", label.to_std_string_escaped(), time - t);
-                for msg in args.iter().skip(1) {
-                    concat = concat + " " + &msg.display().to_string();
-                }
-                logger.log(concat, &ConsoleState::new(console, context))
-            },
-        )?;
+        if let Some(t) = console.timer_map.get(&label) {
+            let time = Self::system_time_in_ms();
+            let mut concat = format!("{}: {} ms", label.to_std_string_escaped(), time - t);
+            for msg in args.iter().skip(1) {
+                concat = concat + " " + &msg.display().to_string();
+            }
+            logger.log(concat, &ConsoleState::new(console, context))?;
+        } else {
+            logger.warn(
+                format!("Timer '{}' doesn't exist", label.to_std_string_escaped()),
+                &ConsoleState::new(console, context),
+            )?;
+        }
 
         Ok(JsValue::undefined())
     }
@@ -779,25 +786,22 @@ impl Console {
             None => "default".into(),
         };
 
-        console.timer_map.remove(&label).map_or_else(
-            || {
-                logger.warn(
-                    format!("Timer '{}' doesn't exist", label.to_std_string_escaped()),
-                    &ConsoleState::new(console, context),
-                )
-            },
-            |t| {
-                let time = Self::system_time_in_ms();
-                logger.info(
-                    format!(
-                        "{}: {} ms - timer removed",
-                        label.to_std_string_escaped(),
-                        time - t
-                    ),
-                    &ConsoleState::new(console, context),
-                )
-            },
-        )?;
+        if let Some(t) = console.timer_map.remove(&label) {
+            let time = Self::system_time_in_ms();
+            logger.info(
+                format!(
+                    "{}: {} ms - timer removed",
+                    label.to_std_string_escaped(),
+                    time - t
+                ),
+                &ConsoleState::new(console, context),
+            )?;
+        } else {
+            logger.warn(
+                format!("Timer '{}' doesn't exist", label.to_std_string_escaped()),
+                &ConsoleState::new(console, context),
+            )?;
+        };
 
         Ok(JsValue::undefined())
     }

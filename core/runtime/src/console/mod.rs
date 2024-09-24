@@ -33,25 +33,25 @@ pub trait Logger: Trace + Sized {
     ///
     /// # Errors
     /// Returning an error will throw an exception in JavaScript.
-    fn log(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()>;
+    fn log(&self, msg: String, state: &'_ ConsoleState<'_>) -> JsResult<()>;
 
     /// Log an info message (`console.info`).
     ///
     /// # Errors
     /// Returning an error will throw an exception in JavaScript.
-    fn info(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()>;
+    fn info(&self, msg: String, state: &'_ ConsoleState<'_>) -> JsResult<()>;
 
     /// Log a warning message (`console.warn`).
     ///
     /// # Errors
     /// Returning an error will throw an exception in JavaScript.
-    fn warn(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()>;
+    fn warn(&self, msg: String, state: &'_ ConsoleState<'_>) -> JsResult<()>;
 
     /// Log an error message (`console.error`).
     ///
     /// # Errors
     /// Returning an error will throw an exception in JavaScript.
-    fn error(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()>;
+    fn error(&self, msg: String, state: &'_ ConsoleState<'_>) -> JsResult<()>;
 }
 
 /// The default implementation for logging from the console.

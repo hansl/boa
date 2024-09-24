@@ -120,22 +120,22 @@ struct RecordingLogger {
 }
 
 impl Logger for RecordingLogger {
-    fn log(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()> {
+    fn log(&self, msg: String, state: &ConsoleState, _: &mut Context) -> JsResult<()> {
         use std::fmt::Write;
         let indent = state.indent();
         writeln!(self.log.borrow_mut(), "{msg:>indent$}").map_err(JsError::from_rust)
     }
 
-    fn info(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()> {
-        self.log(msg, state)
+    fn info(&self, msg: String, state: &ConsoleState, context: &mut Context) -> JsResult<()> {
+        self.log(msg, state, context)
     }
 
-    fn warn(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()> {
-        self.log(msg, state)
+    fn warn(&self, msg: String, state: &ConsoleState, context: &mut Context) -> JsResult<()> {
+        self.log(msg, state, context)
     }
 
-    fn error(&self, msg: String, state: &ConsoleState<'_>) -> JsResult<()> {
-        self.log(msg, state)
+    fn error(&self, msg: String, state: &ConsoleState, context: &mut Context) -> JsResult<()> {
+        self.log(msg, state, context)
     }
 }
 

@@ -124,7 +124,7 @@ impl JsRequest {
                 .map_err(|_| js_error!(URIError: "Invalid URI"))?;
                 http::request::Request::builder()
                     .uri(uri)
-                    .body(())
+                    .body(Some(Vec::<u8>::new()))
                     .map_err(|_| js_error!(Error: "Cannot construct request"))?
             }
             Either::Right(r) => r.into_inner(),

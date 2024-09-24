@@ -1,7 +1,7 @@
 //! The [`Headers`] JavaScript class.
 //!
 //! See <https://developer.mozilla.org/en-US/docs/Web/API/Headers>.
-use boa_engine::object::builtins::{JsArray, JsFunction, TypedJsFunction};
+use boa_engine::object::builtins::{JsArray, TypedJsFunction};
 use boa_engine::value::Convert;
 use boa_engine::{
     js_error, Context, Finalize, JsData, JsObject, JsResult, JsString, JsValue, Trace,
@@ -11,7 +11,7 @@ use http::header::HeaderMap as HttpHeaderMap;
 use http::{HeaderName, HeaderValue};
 use std::str::FromStr;
 
-pub type ForEachCallback = TypedJsFunction<(JsString, JsString, JsObject), JsResult<()>>;
+pub type ForEachCallback = TypedJsFunction<(JsString, JsString, JsObject), ()>;
 
 /// Converts a JavaScript string to a valid header name (or error).
 ///
@@ -90,15 +90,44 @@ impl JsHeaders {
         &self,
         callback: ForEachCallback,
         this_arg: Option<JsValue>,
-        object: JsObject,
+        object: &JsObject<Self>,
         context: &mut Context,
     ) -> JsResult<()> {
+        let object = object.clone().upcast();
+        let this_arg = this_arg.unwrap_or_else(|| JsValue::undefined());
         for (k, v) in self.headers.iter() {
-            let k: JsValue = JsString::from(k.as_str()).into();
-            let v: JsValue = JsString::from(v.to_str().unwrap_or("")).into();
-            callback.call(context, this_arg, &[v, k, object])?;
+            let k = JsString::from(k.as_str());
+            let v = JsString::from(v.to_str().unwrap_or(""));
+            callback.call_with_this(&this_arg, context, (v, k, object.clone()))?;
         }
         Ok(())
+    }
+
+    /// Returns a byte string of all the values of a header within a Headers object
+    /// with a given name. If the requested header doesn't exist in the Headers
+    /// object, it returns null.
+    ///
+    /// # Errors
+    /// If the key is not valid ASCII, an error is returned.
+    pub fn get(&self, key: JsString) -> JsResult<Option<JsString>> {
+        let key = to_header_name(&key)?;
+        let value = self
+            .headers
+            .get_all(key)
+            .into_iter()
+            .map(|v| v.to_str().unwrap_or(""));
+
+        // Use an Option<String> to accumulate the values into a single string,
+        // if there are any. Otherwise, we return None.
+        let value = value.fold(None, |mut acc, v| {
+            let str = acc.get_or_insert_with(|| String::new());
+            if !str.is_empty() {
+                str.push(',');
+            }
+            str.push_str(v);
+            acc
+        });
+        Ok(value.map(JsString::from))
     }
 }
 
@@ -136,15 +165,18 @@ js_class! {
             this: JsClass<JsHeaders>,
             callback: ForEachCallback,
             this_arg: Option<JsValue>,
+            context: &mut Context,
         ) -> JsResult<()> {
-            this.borrow().for_each(callback, this_arg, &this.inner())
+            this.borrow().for_each(callback, this_arg, this.inner(), context)
         }
 
         fn get(
             this: JsClass<JsHeaders>,
             name: Convert<JsString>,
         ) -> JsResult<JsValue> {
-            unimplemented!("Headers.prototype.get")
+            this.borrow()
+                .get(name.0)
+                .map(|v| v.map_or(JsValue::null(), JsValue::from))
         }
 
         fn getSetCookie(

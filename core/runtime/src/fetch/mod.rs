@@ -70,9 +70,9 @@ pub fn fetch<T: Fetcher>(
             }
         }
     };
-    let request = request.map()
+    // let request = request.map()
 
-    let response = fetcher.fetch_blocking(&request, context);
+    // let response = fetcher.fetch_blocking(&request, context);
     todo!()
 }
 

@@ -24,7 +24,6 @@ use boa_engine::{
 };
 use boa_gc::{Finalize, Trace};
 use rustc_hash::FxHashMap;
-use std::cell::RefMut;
 use std::{cell::RefCell, collections::hash_map::Entry, io::Write, rc::Rc, time::SystemTime};
 
 /// A trait that can be used to forward console logs to an implementation.

@@ -24,6 +24,7 @@ use boa_engine::{
 };
 use boa_gc::{Finalize, Trace};
 use rustc_hash::FxHashMap;
+use std::cell::RefMut;
 use std::{cell::RefCell, collections::hash_map::Entry, io::Write, rc::Rc, time::SystemTime};
 
 /// A trait that can be used to forward console logs to an implementation.
@@ -181,16 +182,22 @@ fn formatter(data: &[JsValue], context: &mut Context) -> JsResult<String> {
     }
 }
 
+/// The current state of the console, passed to the logger backend.
+/// This should not be copied or cloned. References are only valid
+/// for the current logging call.
 #[derive(Debug)]
 pub struct ConsoleState<'a> {
     console: &'a Console,
-    context: &'a mut Context,
+    context: RefCell<&'a mut Context>,
 }
 
 impl<'a> ConsoleState<'a> {
     /// Create a new console state.
     pub(crate) fn new(console: &'a Console, context: &'a mut Context) -> Self {
-        Self { console, context }
+        Self {
+            console,
+            context: RefCell::new(context),
+        }
     }
 
     /// Returns the indentation level that should be applied to logging.
@@ -214,8 +221,8 @@ impl<'a> ConsoleState<'a> {
     }
 
     /// Returns the boa execution context.
-    pub fn context(&mut self) -> &mut Context {
-        self.context
+    pub fn context(&self) -> RefMut<'a, &mut Context> {
+        self.context.borrow_mut()
     }
 }
 

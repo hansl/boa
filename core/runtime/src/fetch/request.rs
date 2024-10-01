@@ -28,8 +28,8 @@ impl RequestInit {
     /// body specified by JavaScript and the builder.
     fn into_request_builder(
         mut self,
-        maybe_request: Option<HttpRequest<()>>,
-    ) -> JsResult<(Option<JsValue>, HttpRequest<()>)> {
+        maybe_request: Option<HttpRequest<Option<Vec<u8>>>>,
+    ) -> JsResult<HttpRequest<Option<Vec<u8>>>> {
         let mut builder = HttpRequest::builder();
         if let Some(r) = maybe_request {
             let (parts, _body) = r.into_parts();
@@ -73,10 +73,12 @@ impl RequestInit {
             )?.as_str())
         }
 
+        if let Some(body) = self.body {}
+
         Ok((
             self.body.take(),
             builder
-                .body(())
+                .body(None)
                 .map_err(|_| js_error!(Error: "Cannot construct request"))?,
         ))
     }
@@ -131,8 +133,8 @@ impl JsRequest {
         };
 
         if let Some(options) = options {
-            let (body, inner) = options.into_request_builder(Some(request))?;
-            Ok(Self { inner, body })
+            let inner = options.into_request_builder(Some(request))?;
+            Ok(Self { inner })
         } else {
             Ok(Self {
                 inner: request,

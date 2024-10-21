@@ -26,6 +26,9 @@ pub struct RequestInit {
 impl RequestInit {
     /// Create a [`http::request::Builder`] object and return both the
     /// body specified by JavaScript and the builder.
+    ///
+    /// # Errors
+    /// If the body is not a valid type, an error is returned.
     pub fn into_request_builder(
         mut self,
         maybe_request: Option<HttpRequest<Option<Vec<u8>>>>,
@@ -51,7 +54,7 @@ impl RequestInit {
                 let key = hkey.to_std_string().map_err(|_| {
                     js_error!(TypeError: "Request constructor: {} is an invalid header name", hkey.to_std_string_escaped())
                 })?;
-                if key.chars().any(|c| !c.is_ascii()) {
+                if !key.is_ascii() {
                     return Err(
                         js_error!(TypeError: "Request constructor: {} is an invalid header name", hkey.to_std_string_escaped()),
                     );
@@ -70,7 +73,7 @@ impl RequestInit {
         if let Some(Convert(ref method)) = self.method.take() {
             builder = builder.method(method.to_std_string().map_err(
                 |_| js_error!(TypeError: "Requestion constructor: {} is an invalid method", method.to_std_string_escaped()),
-            )?.as_str())
+            )?.as_str());
         }
 
         let mut request_body = None;
@@ -88,9 +91,9 @@ impl RequestInit {
             }
         }
 
-        Ok(builder
+        builder
             .body(request_body)
-            .map_err(|_| js_error!(Error: "Cannot construct request"))?)
+            .map_err(|_| js_error!(Error: "Cannot construct request"))
     }
 }
 
@@ -108,10 +111,10 @@ pub struct JsRequest {
 impl JsRequest {
     /// Get the inner `http::Request` object. This drops the body (if any).
     pub fn into_inner(mut self) -> HttpRequest<Option<Vec<u8>>> {
-        let inner = mem::replace(&mut self.inner, HttpRequest::new(None));
-        inner
+        mem::replace(&mut self.inner, HttpRequest::new(None))
     }
 
+    /// Get a reference to the inner `http::Request` object.
     pub fn inner(&self) -> &HttpRequest<Option<Vec<u8>>> {
         &self.inner
     }
@@ -123,6 +126,9 @@ impl JsRequest {
 
     /// Create a [`JsRequest`] instance from JavaScript arguments, similar to
     /// calling its constructor in JavaScript.
+    ///
+    /// # Errors
+    /// If the URI is invalid, an error is returned.
     pub fn create_from_js(
         input: Either<JsString, JsRequest>,
         options: Option<RequestInit>,

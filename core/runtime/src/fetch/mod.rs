@@ -18,6 +18,7 @@ use boa_engine::realm::Realm;
 use boa_engine::{
     js_error, js_string, Context, JsError, JsObject, JsResult, JsString, NativeObject,
 };
+use boa_gc::Gc;
 use boa_interop::IntoJsFunctionCopied;
 use either::Either;
 use http::{Request as HttpRequest, Request, Response as HttpResponse};
@@ -26,10 +27,8 @@ pub mod headers;
 pub mod request;
 
 /// A trait for backend implementation of an HTTP fetcher.
-/// This MUST implement clone to allow for the context not to be
-/// borrowed when getting a reference to the fetcher.
 // TODO: consider implementing an async version of this.
-pub trait Fetcher: NativeObject + Sized + Clone {
+pub trait Fetcher: NativeObject + Sized {
     /// Fetch an HTTP document, returning an HTTP response.
     ///
     /// # Errors
@@ -44,6 +43,9 @@ pub trait Fetcher: NativeObject + Sized + Clone {
 
 /// The `fetch` function.
 ///
+/// A [`Gc`]<[`Fetcher`]> implementation MUST be inserted in the [`Context`] (or
+/// [`Realm`] if you're using multiple contexts) before calling this function.
+///
 /// # Errors
 /// If the fetcher is not registered in the context, an error is returned.
 /// This function will also return any error that the fetcher returns, or
@@ -53,7 +55,12 @@ pub fn fetch<T: Fetcher>(
     options: Option<RequestInit>,
     context: &mut Context,
 ) -> JsResult<JsPromise> {
-    let Some(fetcher) = context.get_data::<T>().cloned() else {
+    // Try fetching from the context first, then the current realm. Else fail.
+    let Some(fetcher) = context
+        .get_data::<Gc<T>>()
+        .cloned()
+        .or_else(|| context.realm().host_defined().get::<Gc<T>>().cloned())
+    else {
         return Err(
             js_error!(Error: "implementation of fetch requires a fetcher registered in the context"),
         );
@@ -64,10 +71,9 @@ pub fn fetch<T: Fetcher>(
     let request: Request<Option<Vec<u8>>> = match resource {
         Either::Left(url) => {
             let url = url.to_std_string().map_err(JsError::from_rust)?;
-            let request = HttpRequest::get(url)
+            HttpRequest::get(url)
                 .body(Some(Vec::new()))
-                .map_err(JsError::from_rust)?;
-            request
+                .map_err(JsError::from_rust)?
         }
         Either::Right(request) => {
             // This can be a [`JsRequest`] object.
@@ -88,10 +94,10 @@ pub fn fetch<T: Fetcher>(
         request
     };
 
-    let request = request.map(|maybe_body| maybe_body.unwrap_or_default());
+    let request = request.map(Option::unwrap_or_default);
     let response = fetcher.fetch_blocking(&request, context)?;
 
-    eprintln!("Response: {:?}", response);
+    eprintln!("Response: {response:?}");
     todo!()
 }
 
@@ -99,14 +105,23 @@ pub fn fetch<T: Fetcher>(
 ///
 /// # Errors
 /// If any of the classes fail to register, an error is returned.
-pub fn register<F: Fetcher>(fetcher: F, realm: &Realm, context: &mut Context) -> JsResult<()> {
+pub fn register<F: Fetcher>(
+    fetcher: F,
+    realm: Option<&Realm>,
+    context: &mut Context,
+) -> JsResult<()> {
     context.register_global_class::<JsHeaders>()?;
     context.register_global_class::<JsRequest>()?;
 
     let fetch_fn = fetch::<F>
         .into_js_function_copied(context)
-        .to_js_function(realm);
-    context.insert_data(fetcher);
+        .to_js_function(realm.unwrap_or_else(|| context.realm()));
+
+    if let Some(realm) = realm {
+        realm.host_defined_mut().insert(Gc::new(fetcher));
+    } else {
+        context.insert_data(Gc::new(fetcher));
+    }
     context.register_global_property(js_string!("fetch"), fetch_fn, Attribute::all())?;
 
     Ok(())

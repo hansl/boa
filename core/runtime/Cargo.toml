@@ -17,6 +17,7 @@ boa_interop.workspace = true
 either = "1"
 rustc-hash = { workspace = true, features = ["std"] }
 http = "1"
+url = "2.5.2"
 
 [dev-dependencies]
 indoc.workspace = true

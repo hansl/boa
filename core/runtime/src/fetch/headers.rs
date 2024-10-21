@@ -11,6 +11,7 @@ use http::header::HeaderMap as HttpHeaderMap;
 use http::{HeaderName, HeaderValue};
 use std::str::FromStr;
 
+/// A callback function for the `forEach` method.
 pub type ForEachCallback = TypedJsFunction<(JsString, JsString, JsObject), ()>;
 
 /// Converts a JavaScript string to a valid header name (or error).
@@ -86,6 +87,10 @@ impl JsHeaders {
     }
 
     /// Executes a provided function once for each key/value pair in the Headers object.
+    ///
+    /// # Errors
+    /// If the callback function returns an error, it is returned.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn for_each(
         &self,
         callback: ForEachCallback,
@@ -94,8 +99,8 @@ impl JsHeaders {
         context: &mut Context,
     ) -> JsResult<()> {
         let object = object.clone().upcast();
-        let this_arg = this_arg.unwrap_or_else(|| JsValue::undefined());
-        for (k, v) in self.headers.iter() {
+        let this_arg = this_arg.unwrap_or_default();
+        for (k, v) in &self.headers {
             let k = JsString::from(k.as_str());
             let v = JsString::from(v.to_str().unwrap_or(""));
             callback.call_with_this(&this_arg, context, (v, k, object.clone()))?;
@@ -120,7 +125,7 @@ impl JsHeaders {
         // Use an Option<String> to accumulate the values into a single string,
         // if there are any. Otherwise, we return None.
         let value = value.fold(None, |mut acc, v| {
-            let str = acc.get_or_insert_with(|| String::new());
+            let str = acc.get_or_insert_with(String::new);
             if !str.is_empty() {
                 str.push(',');
             }
@@ -161,7 +166,7 @@ js_class! {
             this.borrow().entries(context)
         }
 
-        fn forEach(
+        fn for_each as "forEach"(
             this: JsClass<JsHeaders>,
             callback: ForEachCallback,
             this_arg: Option<JsValue>,
@@ -179,7 +184,7 @@ js_class! {
                 .map(|v| v.map_or(JsValue::null(), JsValue::from))
         }
 
-        fn getSetCookie(
+        fn get_set_cookie as "getSetCookie"(
             _this: JsClass<JsHeaders>,
             _name: Convert<JsString>,
         ) -> JsResult<JsValue> {

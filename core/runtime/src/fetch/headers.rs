@@ -109,8 +109,8 @@ impl JsHeaders {
     ///
     /// # Errors
     /// If the key is not valid ASCII, an error is returned.
-    pub fn get(&self, key: JsString) -> JsResult<Option<JsString>> {
-        let key = to_header_name(&key)?;
+    pub fn get(&self, key: &JsString) -> JsResult<Option<JsString>> {
+        let key = to_header_name(key)?;
         let value = self
             .headers
             .get_all(key)
@@ -175,40 +175,40 @@ js_class! {
             name: Convert<JsString>,
         ) -> JsResult<JsValue> {
             this.borrow()
-                .get(name.0)
+                .get(&name.0)
                 .map(|v| v.map_or(JsValue::null(), JsValue::from))
         }
 
         fn getSetCookie(
-            this: JsClass<JsHeaders>,
-            name: Convert<JsString>,
+            _this: JsClass<JsHeaders>,
+            _name: Convert<JsString>,
         ) -> JsResult<JsValue> {
             unimplemented!("Headers.prototype.get")
         }
 
         fn has(
-            this: JsClass<JsHeaders>,
-            name: Convert<JsString>,
+            _this: JsClass<JsHeaders>,
+            _name: Convert<JsString>,
         ) -> JsResult<bool> {
             unimplemented!("Headers.prototype.has")
         }
 
         fn keys(
-            this: JsClass<JsHeaders>,
+            _this: JsClass<JsHeaders>,
         ) -> JsValue {
             unimplemented!("Headers.prototype.keys")
         }
 
         fn set(
-            this: JsClass<JsHeaders>,
-            name: Convert<JsString>,
-            value: Convert<JsString>,
+            _this: JsClass<JsHeaders>,
+            _name: Convert<JsString>,
+            _value: Convert<JsString>,
         ) -> JsResult<()> {
             unimplemented!("Headers.prototype.set")
         }
 
         fn values(
-            this: JsClass<JsHeaders>,
+            _this: JsClass<JsHeaders>,
         ) -> JsValue {
             unimplemented!("Headers.prototype.values")
         }

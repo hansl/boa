@@ -56,10 +56,10 @@ mod console;
 #[doc(inline)]
 pub use console::{Console, Logger};
 
-mod fetch;
+pub mod fetch;
 
 #[doc(inline)]
-pub use fetch::*;
+pub use fetch::{register as register_fetch, Fetcher};
 
 #[cfg(test)]
 pub(crate) mod test {

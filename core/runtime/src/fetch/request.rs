@@ -26,7 +26,7 @@ pub struct RequestInit {
 impl RequestInit {
     /// Create a [`http::request::Builder`] object and return both the
     /// body specified by JavaScript and the builder.
-    fn into_request_builder(
+    pub fn into_request_builder(
         mut self,
         maybe_request: Option<HttpRequest<Option<Vec<u8>>>>,
     ) -> JsResult<HttpRequest<Option<Vec<u8>>>> {
@@ -73,14 +73,24 @@ impl RequestInit {
             )?.as_str())
         }
 
-        if let Some(body) = self.body {}
+        let mut request_body = None;
+        if let Some(body) = &self.body {
+            // TODO: add more support types.
+            if let Some(body) = body.as_string() {
+                let body = body.to_std_string().map_err(
+                    |_| js_error!(TypeError: "Request constructor: body is not a valid string"),
+                )?;
+                request_body = Some(body.into_bytes());
+            } else {
+                return Err(
+                    js_error!(TypeError: "Request constructor: body is not a supported type"),
+                );
+            }
+        }
 
-        Ok((
-            self.body.take(),
-            builder
-                .body(None)
-                .map_err(|_| js_error!(Error: "Cannot construct request"))?,
-        ))
+        Ok(builder
+            .body(request_body)
+            .map_err(|_| js_error!(Error: "Cannot construct request"))?)
     }
 }
 
@@ -136,10 +146,7 @@ impl JsRequest {
             let inner = options.into_request_builder(Some(request))?;
             Ok(Self { inner })
         } else {
-            Ok(Self {
-                inner: request,
-                body: None,
-            })
+            Ok(Self { inner: request })
         }
     }
 }

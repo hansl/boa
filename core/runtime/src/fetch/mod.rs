@@ -8,7 +8,7 @@
 //! [mdn]: https://developer.mozilla.org/en-US/docs/Web/API/fetch
 
 #[cfg(test)]
-mod tests;
+pub mod tests;
 
 use crate::fetch::headers::JsHeaders;
 use crate::fetch::request::{JsRequest, RequestInit};
@@ -25,6 +25,7 @@ use http::{Request as HttpRequest, Request, Response as HttpResponse};
 
 pub mod headers;
 pub mod request;
+pub mod response;
 
 /// A trait for backend implementation of an HTTP fetcher.
 // TODO: consider implementing an async version of this.

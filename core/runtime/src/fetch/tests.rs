@@ -51,7 +51,7 @@ fn request_constructor() {
             let mut fetcher = TestFetcher::default();
             fetcher.add_response(
                 Uri::from_static("http://example.com"),
-                Response::new(Vec::new()),
+                Response::new("Hello World".as_bytes().to_vec()),
             );
             register_fetch(fetcher, None, ctx).expect("failed to register fetch");
         }),

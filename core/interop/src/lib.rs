@@ -471,6 +471,11 @@ impl<'a, T: NativeObject + Clone> TryFromJsArgument<'a> for ContextData<T> {
 // arguments.
 mod into_js_function_impls;
 
+#[proc_macro]
+pub fn boa_class(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    macros::class::boa_class(input).into()
+}
+
 #[test]
 #[allow(clippy::missing_panics_doc)]
 pub fn into_js_module() {

@@ -18,6 +18,7 @@ use syn::{
 use synstructure::{decl_derive, AddBounds, Structure};
 
 mod embedded_module_loader;
+mod class;
 
 /// Implementation of the inner iterator of the `embed_module!` macro. All
 /// arguments are required.
@@ -28,6 +29,12 @@ mod embedded_module_loader;
 #[proc_macro]
 pub fn embed_module_inner(input: TokenStream) -> TokenStream {
     embedded_module_loader::embed_module_impl(input)
+}
+
+/// `#[boa_class]` attribute macro for defining JavaScript classes.
+#[proc_macro_attribute]
+pub fn boa_class(args: TokenStream, input: TokenStream) -> TokenStream {
+    class::class(args, input)
 }
 
 struct Static {

@@ -1,5 +1,4 @@
 //! Module declaring interop macro rules.
-pub mod class;
 
 /// Declare a JavaScript class, in a simpler way.
 ///

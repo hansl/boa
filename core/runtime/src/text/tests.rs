@@ -2,6 +2,7 @@ use crate::test::{run_test_actions_with, TestAction};
 use crate::{TextDecoder, TextEncoder};
 use boa_engine::object::builtins::JsUint8Array;
 use boa_engine::property::Attribute;
+use boa_engine::value::TryFromJs;
 use boa_engine::{js_str, js_string, Context, JsString};
 use indoc::indoc;
 
@@ -57,9 +58,8 @@ fn encoder_js_unpaired() {
                     .global_object()
                     .get(js_str!("encoded"), context)
                     .unwrap();
-                let array =
-                    JsUint8Array::from_object(encoded.as_object().unwrap().clone()).unwrap();
-                let buffer = array.iter(context).collect::<Vec<_>>();
+                let array = JsUint8Array::try_from_js(&encoded, context).unwrap();
+                let buffer = array.to_vec(context);
 
                 assert_eq!(buffer, "\u{FFFD}\u{FFFD}\u{15}".as_bytes());
             }),
@@ -69,7 +69,7 @@ fn encoder_js_unpaired() {
 }
 
 #[test]
-fn decoder_js() {
+fn decoder_js_utf8() {
     let context = &mut Context::default();
     TextDecoder::register(context).unwrap();
 
@@ -81,13 +81,46 @@ fn decoder_js() {
                     Uint8Array.from([ 72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33 ])
                 );
             "#}),
-            TestAction::inspect_context(|context| {
-                let decoded = context
-                    .global_object()
-                    .get(js_str!("decoded"), context)
-                    .unwrap();
-                assert_eq!(decoded.as_string(), Some(&js_string!("Hello, World!")));
-            }),
+            TestAction::assert_eq("decoded", js_string!("Hello, World!")),
+        ],
+        context,
+    );
+}
+
+#[test]
+fn decoder_js_utf16() {
+    let context = &mut Context::default();
+    TextDecoder::register(context).unwrap();
+
+    run_test_actions_with(
+        [
+            TestAction::run(indoc! {r#"
+                const d = new TextDecoder("utf-16");
+                decoded = d.decode(
+                    Uint8Array.from([ 72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33, 0 ])
+                );
+            "#}),
+            TestAction::assert_eq("decoded", js_string!("Hello, World!")),
+        ],
+        context,
+    );
+}
+
+#[cfg(feature = "encoding")]
+#[test]
+fn decoder_js_ibm866() {
+    let context = &mut Context::default();
+    TextDecoder::register(context).unwrap();
+
+    run_test_actions_with(
+        [
+            TestAction::run(indoc! {r#"
+                const d = new TextDecoder("ibm866");
+                decoded = d.decode(
+                    Uint8Array.from([ 72, 101, 108, 108, 111, 0xF0, 87, 111, 114, 108, 100, 33 ])
+                );
+            "#}),
+            TestAction::assert_eq("decoded", js_string!("HelloЁWorld!")),
         ],
         context,
     );
@@ -96,8 +129,6 @@ fn decoder_js() {
 #[test]
 fn decoder_js_invalid() {
     use crate::test::{run_test_actions_with, TestAction};
-    use indoc::indoc;
-
     let context = &mut Context::default();
     TextDecoder::register(context).unwrap();
 
@@ -109,16 +140,7 @@ fn decoder_js_invalid() {
                     Uint8Array.from([ 72, 101, 108, 108, 111, 160, 87, 111, 114, 108, 100, 161 ])
                 );
             "#}),
-            TestAction::inspect_context(|context| {
-                let decoded = context
-                    .global_object()
-                    .get(js_str!("decoded"), context)
-                    .unwrap();
-                assert_eq!(
-                    decoded.as_string(),
-                    Some(&js_string!("Hello\u{FFFD}World\u{FFFD}"))
-                );
-            }),
+            TestAction::assert_eq("decoded", js_string!("Hello\u{FFFD}World\u{FFFD}")),
         ],
         context,
     );

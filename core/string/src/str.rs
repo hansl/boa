@@ -130,6 +130,20 @@ impl<'a> JsStr<'a> {
         self.len() == 0
     }
 
+    /// Returns the bytes of the [`JsStr`] as a slice.
+    /// This may not be valid UTF-16, or valid Latin1.
+    #[inline]
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        match self.variant() {
+            JsStrVariant::Latin1(v) => v,
+            // Safety: The conversion from u16 slice to u8 is always safe.
+            JsStrVariant::Utf16(v) => unsafe {
+                std::slice::from_raw_parts(v.as_ptr().cast::<u8>(), v.len() * 2)
+            },
+        }
+    }
+
     /// Trims both leading and trailing space.
     #[inline]
     #[must_use]

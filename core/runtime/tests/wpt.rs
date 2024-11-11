@@ -129,12 +129,7 @@ impl TestSuiteSource {
                 .map_or(script.to_string(), |(s, _)| s.to_string());
 
             // Resolve the source path relative to the script path, but under the wpt_path.
-            let script_path = Path::new(&script);
-            let path = if script_path.is_relative() {
-                dir.join(script_path)
-            } else {
-                script_path.to_path_buf()
-            };
+            let path = Path::new(&script);
 
             for (from, to) in REWRITE_RULES {
                 if path.to_string_lossy().as_ref() == *from {
@@ -317,6 +312,7 @@ fn execute_test_file(path: &Path) {
         } else {
             wpt_path.join(script_path.to_string_lossy().trim_start_matches('/'))
         };
+        eprintln!("script_path = {script_path:?}, path = {path:?}");
 
         if path.exists() {
             let source = Source::from_filepath(&path).expect("Could not parse source.");
@@ -363,7 +359,7 @@ fn console(
 }
 
 /// Test the text encoder/decoder with the WPT test suite.
-#[ignore] // TODO: support all encodings.
+// #[ignore] // TODO: support all encodings.
 #[cfg(not(feature = "wpt-tests-do-not-use"))]
 #[rstest::rstest]
 fn encoding(

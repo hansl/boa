@@ -174,6 +174,17 @@ pub(crate) mod test {
         pub(crate) fn inspect_context(op: fn(&mut Context)) -> Self {
             Self(Inner::InspectContext { op })
         }
+
+        /// Assert that a global variable is equal to `expected`.
+        pub(crate) fn assert_eq(
+            source: impl Into<Cow<'static, str>>,
+            expected: impl Into<JsValue>,
+        ) -> Self {
+            Self(Inner::AssertEq {
+                source: source.into(),
+                expected: expected.into(),
+            })
+        }
     }
 
     /// Executes a list of test actions on a new, default context.

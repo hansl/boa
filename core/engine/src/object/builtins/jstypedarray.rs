@@ -1033,6 +1033,11 @@ macro_rules! JsTypedArrayType {
                     }
                 })
             }
+
+            /// Create a vector of the typed array's elements.
+            pub fn to_vec(&self, context: &mut Context) -> Vec<$element> {
+                self.iter(context).collect()
+            }
         }
 
         impl From<$name> for JsObject {

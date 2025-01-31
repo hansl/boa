@@ -176,12 +176,16 @@ pub trait HostHooks {
         None
     }
 
-    /// Gets the current UTC time of the host.
+    /// Gets the current UTC time of the host, in milliseconds since epoch.
     ///
     /// Defaults to using [`OffsetDateTime::now_utc`] on all targets,
     /// which can cause panics if the target doesn't support [`SystemTime::now`][time].
     ///
     /// [time]: std::time::SystemTime::now
+    #[deprecated(
+        since = "0.21.0",
+        note = "Use `context.clock().now().millis_since_epoch()` instead"
+    )]
     fn utc_now(&self) -> i64 {
         let now = OffsetDateTime::now_utc();
         now.unix_timestamp() * 1000 + i64::from(now.millisecond())

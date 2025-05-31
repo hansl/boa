@@ -1,11 +1,12 @@
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use std::collections::BTreeMap;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit_mut::VisitMut;
-use syn::{ImplItemFn, ItemImpl, Meta, MetaNameValue, Token};
+use syn::{ImplItemFn, ItemImpl, Meta, MetaNameValue, Token, Type};
 
 #[derive(Debug, Default)]
 struct ClassVisitor {
@@ -16,8 +17,19 @@ struct ClassVisitor {
 }
 
 impl ClassVisitor {
-    fn method(&mut self, name: String, fn_: ImplItemFn) {
-        let has_self = fn_.sig.receiver().is_some();
+    fn method(&mut self, span: impl Spanned, name: String, fn_: ImplItemFn) {
+        if fn_.sig.asyncness.is_some() {
+            self.error(span, "Async methods are not supported.");
+            return;
+        }
+
+        if !fn_.sig.generics.params.is_empty() {
+            self.error(span, "Generic methods are not supported.");
+            return;
+        }
+
+        if fn_.sig.receiver().is_some() {}
+
         self.methods.insert(name, quote! { #fn_ }.into());
     }
 
@@ -38,6 +50,26 @@ impl ClassVisitor {
             }
             Some(e) => {
                 e.combine(error);
+            }
+        }
+    }
+
+    fn serialize_class_impl(&self, class_ty: &Type, class_name: &str) -> TokenStream2 {
+        quote! {
+            impl boa_engine::class::Class for #class_ty {
+                const NAME: &'static str = #class_name;
+
+                fn data_constructor(
+                    new_target: &boa_engine::JsValue,
+                    args: &[boa_engine::JsValue],
+                    context: &mut boa_engine::Context
+                ) -> boa_engine::JsResult<Self> {
+                    todo!();
+                }
+
+                fn init(builder: &mut boa_engine::class::ClassBuilder) -> boa_engine::JsResult<()> {
+                    todo!();
+                }
             }
         }
     }
@@ -93,7 +125,7 @@ impl VisitMut for ClassVisitor {
         } else if is_ctor {
             self.constructor(item.sig.ident.to_string(), item.clone());
         } else if is_method {
-            self.method(item.sig.ident.to_string(), item.clone());
+            self.method(item.sig.span(), item.sig.ident.to_string(), item.clone());
         }
 
         syn::visit_mut::visit_impl_item_fn_mut(self, item);
@@ -130,5 +162,21 @@ pub(crate) fn class_impl(attr: TokenStream, input: TokenStream) -> TokenStream {
 
     eprintln!("impl: {impl_:?}");
 
-    quote! { #impl_ }.into()
+    let name = match impl_.self_ty.as_ref() {
+        Type::Path(pa) if pa.path.get_ident().is_some() => pa.path.get_ident().unwrap().to_string(),
+        _ => {
+            return syn::Error::new(impl_.span(), "Impossible to find the name of the class.")
+                .to_compile_error()
+                .into()
+        }
+    };
+
+    let class_impl = visitor.serialize_class_impl(&impl_.self_ty, &name);
+
+    quote! {
+        #impl_
+
+        #class_impl
+    }
+    .into()
 }

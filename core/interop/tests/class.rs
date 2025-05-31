@@ -1,3 +1,5 @@
+#![allow(unused_crate_dependencies)]
+
 use boa_engine::{js_str, js_string, Context, JsString, Source};
 use boa_macros::{class as boa_class, Finalize, JsData, Trace};
 
@@ -17,7 +19,7 @@ struct Animal {
 #[boa_class]
 impl Animal {
     #[boa(constructor)]
-    fn new(name: String, age: i32) -> Self {
+    pub fn new(name: String, age: i32) -> Self {
         let ty = match name.as_str() {
             "cat" => AnimalType::Cat,
             "dog" => AnimalType::Dog,

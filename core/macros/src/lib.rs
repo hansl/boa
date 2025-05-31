@@ -39,9 +39,9 @@ pub fn embed_module_inner(input: TokenStream) -> TokenStream {
 /// # Warning
 /// This should not be used directly as is, and instead should be used through
 /// the `embed_module!` macro in `boa_interop` for convenience.
-#[proc_macro]
-pub fn class(input: TokenStream) -> TokenStream {
-    class::class_impl(input)
+#[proc_macro_attribute]
+pub fn class(attr: TokenStream, item: TokenStream) -> TokenStream {
+    class::class_impl(attr, item)
 }
 
 struct Static {

@@ -1,31 +1,63 @@
+use boa_engine::{js_str, js_string, Context, JsString, Source};
+use boa_macros::{class as boa_class, Finalize, JsData, Trace};
+
 #[derive(Clone, Trace, Finalize, JsData)]
-enum Animal {
+enum AnimalType {
     Cat,
     Dog,
     Other,
 }
 
-#[boa::class]
+#[derive(Clone, Trace, Finalize, JsData)]
+struct Animal {
+    ty: AnimalType,
+    age: i32,
+}
+
+#[boa_class]
 impl Animal {
     #[boa(constructor)]
-    fn ctor(name: String, age: i32) -> Result<Self> {
-        match name.as_str() {
-            "cat" => Ok(Animal::Cat),
-            "dog" => Ok(Animal::Dog),
-            _ => Ok(Animal::Other),
-        }
+    fn new(name: String, age: i32) -> Self {
+        let ty = match name.as_str() {
+            "cat" => AnimalType::Cat,
+            "dog" => AnimalType::Dog,
+            _ => AnimalType::Other,
+        };
+
+        Self { ty, age }
     }
 
-    #[boa(object, getter)]
-    fn age(this: JsObject, _: Ignore, age: i32) -> i32 {
-        age
+    #[boa(getter)]
+    fn age(&self) -> i32 {
+        self.age
     }
 
     fn speak(&self) -> JsString {
-        match self {
-            Animal::Cat => js_string!("meow"),
-            Animal::Dog => js_string!("woof"),
-            Animal::Other => js_string!(r"¯\_(ツ)_/¯"),
+        match self.ty {
+            AnimalType::Cat => js_string!("meow"),
+            AnimalType::Dog => js_string!("woof"),
+            AnimalType::Other => js_string!(r"¯\_(ツ)_/¯"),
         }
     }
+}
+
+fn main() {
+    let mut context = Context::default();
+
+    context.register_global_class::<Animal>().unwrap();
+
+    let result = context
+        .eval(Source::from_bytes(
+            r#"
+         let pet = new Animal("dog", 3);
+
+        `My pet is ${pet.age} years old. Right, buddy? - ${pet.speak()}!`
+     "#,
+        ))
+        .expect("Could not evaluate script");
+
+    assert_eq!(
+        result.as_string().unwrap(),
+        &js_str!("My pet is 3 years old. Right, buddy? - woof!")
+    );
 }

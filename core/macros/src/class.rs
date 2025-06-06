@@ -1,97 +1,20 @@
+use crate::utils::{
+    error, take_error_from_attrs, take_length_from_attrs, take_name_value_attr, take_path_attr,
+    RenameScheme, SpannedResult,
+};
 use proc_macro::TokenStream;
-use proc_macro2::{Span as Span2, Span, TokenStream as TokenStream2};
-use quote::{quote, ToTokens};
+use proc_macro2::{Span as Span2, TokenStream as TokenStream2};
+use quote::quote;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
-use std::str::FromStr;
-use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit_mut::VisitMut;
 use syn::{
-    Attribute, Expr, ExprLit, FnArg, Ident, ImplItemFn, ItemImpl, Lit, Meta, MetaNameValue,
-    PatType, Receiver, ReturnType, Token, Type,
+    Expr, FnArg, Ident, ImplItemFn, ItemImpl, Lit, Meta, MetaNameValue, PatType, Receiver,
+    ReturnType, Token, Type,
 };
-
-type SpannedResult<T> = Result<T, (Span2, String)>;
-
-/// A function to make it easier to return error messages.
-fn error<T>(span: &impl Spanned, message: impl Display) -> SpannedResult<T> {
-    Err((span.span(), message.to_string()))
-}
-
-/// Look (and remove from AST) a `path` version of the attribute `boa`, e.g. `#[boa(something)]`.
-fn take_path_attr(attrs: &mut Vec<Attribute>, name: &str) -> bool {
-    if let Some((i, _)) = attrs
-        .iter()
-        .enumerate()
-        .filter(|(_, a)| a.path().is_ident("boa"))
-        .filter_map(|(i, a)| a.meta.require_list().ok().map(|nv| (i, nv)))
-        .filter_map(|(i, m)| m.parse_args_with(Ident::parse_any).ok().map(|p| (i, p)))
-        .find(|(_, path)| path == name)
-    {
-        attrs.remove(i);
-        true
-    } else {
-        false
-    }
-}
-
-/// Look (and remove from AST) for a `#[boa(name = ...)]` attribute, where `...`
-/// is a literal. The validation of the literal's type should be done separately.
-fn take_name_value_attr(attrs: &mut Vec<Attribute>, name: &str) -> Option<Lit> {
-    if let Some((i, lit)) = attrs
-        .iter()
-        .enumerate()
-        .filter(|(_, a)| a.meta.path().is_ident("boa"))
-        .filter_map(|(i, a)| a.meta.require_list().ok().map(|nv| (i, nv)))
-        .filter_map(|(i, a)| {
-            syn::parse2::<MetaNameValue>(a.tokens.to_token_stream())
-                .ok()
-                .map(|nv| (i, nv))
-        })
-        .filter(|(_, nv)| nv.path.is_ident(name))
-        .find_map(|(i, nv)| match &nv.value {
-            Expr::Lit(ExprLit { lit, .. }) => Some((i, lit.clone())),
-            _ => None,
-        })
-    {
-        attrs.remove(i);
-        Some(lit)
-    } else {
-        None
-    }
-}
-
-/// Take the length name-value from the list of attributes.
-fn take_length_from_attrs(attrs: &mut Vec<Attribute>) -> SpannedResult<Option<usize>> {
-    match take_name_value_attr(attrs, "length") {
-        None => Ok(None),
-        Some(lit) => match lit {
-            Lit::Int(int) if int.base10_parse::<usize>().is_ok() => int
-                .base10_parse::<usize>()
-                .map(Some)
-                .map_err(|e| (int.span(), format!("Invalid literal: {e}"))),
-            l => error(&l, "Invalid literal type. Was expecting a number")?,
-        },
-    }
-}
-
-/// Take the last `#[boa(error = "...")]` statement if found, remove it from the list
-/// of attributes, and return the literal string.
-fn take_error_from_attrs(attrs: &mut Vec<Attribute>) -> SpannedResult<Option<String>> {
-    match take_name_value_attr(attrs, "error") {
-        None => Ok(None),
-        Some(lit) => match lit {
-            Lit::Str(s) => Ok(Some(s.value())),
-            l => Err((
-                l.span(),
-                "Invalid literal type. Was expecting a string".to_string(),
-            )),
-        },
-    }
-}
 
 /// A function representation. Takes a function from the AST and remember its name, length and
 /// how its body should be in the output AST.
@@ -156,7 +79,7 @@ impl Function {
         i: usize,
     ) -> SpannedResult<(bool, TokenStream2, TokenStream2)> {
         let ty = pat_type.ty.as_ref();
-        let ident = Ident::new(&format!("boa_arg_{i}"), Span::call_site());
+        let ident = Ident::new(&format!("boa_arg_{i}"), Span2::call_site());
 
         // Find out if it's a boa context.
         let is_context = match ty {
@@ -410,110 +333,6 @@ impl Accessor {
                         | boa_engine::property::Attribute::NON_ENUMERABLE,
                 );
             }
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-enum RenameScheme {
-    #[default]
-    None,
-    CamelCase,
-}
-
-impl FromStr for RenameScheme {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("none") {
-            Ok(Self::None)
-        } else if s.eq_ignore_ascii_case("camelcase") {
-            Ok(Self::CamelCase)
-        } else {
-            Err(format!(
-                r#"Invalid rename scheme: {s:?}. Accepted values are "none" or "camelCase"."#
-            ))
-        }
-    }
-}
-
-impl RenameScheme {
-    fn camel_case(s: &str) -> String {
-        #[derive(PartialEq)]
-        enum State {
-            First,
-            NextOfUpper,
-            NextOfContinuedUpper(char),
-            NextOfSepMark,
-            Other,
-        }
-
-        let mut result = String::with_capacity(s.len());
-        let mut state = State::First;
-
-        for ch in s.chars() {
-            let is_upper = ch.is_ascii_uppercase();
-            let is_lower = ch.is_ascii_lowercase();
-
-            match (&state, is_upper, is_lower) {
-                (State::First, true, false) => {
-                    state = State::NextOfUpper;
-                    result.push(ch.to_ascii_lowercase());
-                }
-                (State::First, false, true) => {
-                    state = State::Other;
-                    result.push(ch);
-                }
-                (State::First, false, false) => {}
-                (State::NextOfUpper, true, false) => {
-                    state = State::NextOfContinuedUpper(ch);
-                }
-                (State::NextOfUpper, false, true) => {
-                    state = State::First;
-                    result.push(ch);
-                }
-                (State::NextOfContinuedUpper(last), true, false) => {
-                    result.push(last.to_ascii_lowercase());
-                    state = State::NextOfContinuedUpper(ch);
-                }
-                (State::NextOfContinuedUpper(last), false, true) => {
-                    result.push(last.to_ascii_uppercase());
-                    state = State::First;
-                    result.push(ch);
-                }
-                (State::NextOfContinuedUpper(last), false, false) => {
-                    result.push(last.to_ascii_lowercase());
-                    state = State::NextOfSepMark;
-                }
-                (State::NextOfSepMark, true, false) => {
-                    state = State::NextOfUpper;
-                    result.push(ch);
-                }
-                (State::NextOfSepMark, false, true) | (State::Other, true, false) => {
-                    state = State::NextOfUpper;
-                    result.push(ch.to_ascii_uppercase());
-                }
-                (State::Other, false, true) => {
-                    result.push(ch);
-                }
-                (_, false, false) => {
-                    state = State::NextOfSepMark;
-                }
-                (_, _, _) => {}
-            }
-        }
-
-        if let State::NextOfContinuedUpper(last) = state {
-            result.push(last.to_ascii_lowercase());
-        }
-
-        result
-    }
-
-    fn rename(&self, s: String) -> String {
-        match self {
-            Self::None => s,
-            Self::CamelCase => Self::camel_case(&s),
         }
     }
 }
@@ -782,20 +601,10 @@ pub(crate) fn class_impl(attr: TokenStream, input: TokenStream) -> TokenStream {
     // Parse the input.
     let mut impl_ = syn::parse_macro_input!(input as ItemImpl);
 
-    let renaming = match take_name_value_attr(&mut impl_.attrs, "rename") {
-        None => RenameScheme::default(),
-        Some(Lit::Str(lit_str)) => match RenameScheme::from_str(lit_str.value().as_str()) {
-            Ok(renaming) => renaming,
-            Err(e) => {
-                return syn::Error::new(lit_str.span(), format!("Invalid rename value: {e}"))
-                    .to_compile_error()
-                    .into()
-            }
-        },
-        Some(lit) => {
-            return syn::Error::new(lit.span(), "Invalid attribute value literal type.")
-                .to_compile_error()
-                .into();
+    let renaming = match RenameScheme::from_attrs(&mut impl_.attrs) {
+        Ok(r) => r,
+        Err((span, msg)) => {
+            return syn::Error::new(span, msg).to_compile_error().into();
         }
     };
 
@@ -839,22 +648,4 @@ pub(crate) fn class_impl(attr: TokenStream, input: TokenStream) -> TokenStream {
     }
 
     tokens.into()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::RenameScheme;
-    use test_case::test_case;
-
-    #[rustfmt::skip]
-    #[test_case("HelloWorld", "helloWorld" ; "1")]
-    #[test_case("Hello_World", "helloWorld" ; "2")]
-    #[test_case("hello_world", "helloWorld" ; "3")]
-    #[test_case("__hello_world__", "helloWorld" ; "4")]
-    #[test_case("HELLOWorld", "helloWorld" ; "5")]
-    #[test_case("helloWORLD", "helloWorld" ; "6")]
-    #[test_case("HELLO_WORLD", "helloWorld" ; "7")]
-    fn camel_case(input: &str, expected: &str) {
-        assert_eq!(RenameScheme::camel_case(input).as_str(), expected);
-    }
 }

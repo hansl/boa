@@ -67,7 +67,7 @@ impl Animal {
     }
 }
 
-#[boa_module(name = "/hello.js")]
+#[boa_module]
 mod hello {
     fn world() -> JsString {
         js_string!("hello world")
@@ -90,7 +90,7 @@ fn boa_class() {
     let mut context = Context::default();
 
     let mut module_loader = boa_interop::loaders::HashMapModuleLoader::new();
-    module_loader.register(hello::boa_name(), hello::boa_module());
+    module_loader.register("/hello.js", hello::boa_module());
 
     context.register_global_class::<Animal>().unwrap();
 

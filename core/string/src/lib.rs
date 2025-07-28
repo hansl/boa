@@ -229,6 +229,10 @@ pub struct JsString {
     ptr: NonNull<RawJsString>,
 }
 
+unsafe impl enum_ptr::Aligned for JsString {
+    const ALIGNMENT: usize = align_of::<JsString>();
+}
+
 // JsString should always be pointer sized.
 static_assertions::assert_eq_size!(JsString, *const ());
 

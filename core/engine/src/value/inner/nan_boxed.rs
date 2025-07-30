@@ -3,31 +3,20 @@
 //! A NaN-boxed inner value for JavaScript values.
 #![allow(clippy::inline_always)]
 
-use crate::{
-    JsBigInt, JsObject, JsSymbol, JsVariant, bigint::RawBigInt, object::ErasedVTableObject,
-    symbol::RawJsSymbol,
-};
-use boa_gc::{Finalize, GcBox, Trace, custom_trace};
-use boa_string::{JsString, RawJsString};
-use boxing::nan::{NanBox, RawBox};
+use crate::{JsBigInt, JsObject, JsSymbol, JsVariant};
+use boa_gc::{Finalize, Trace, custom_trace};
+use boa_string::JsString;
 use core::fmt;
-use enum_ptr::{Aligned, EnumPtr};
-use std::{mem::ManuallyDrop, ptr::NonNull};
-use boxing::nan::raw::{RawTag, Value};
+use std::mem::ManuallyDrop;
+use std::ptr::NonNull;
 
-unsafe impl Aligned for JsObject {
-    const ALIGNMENT: usize = align_of::<JsObject>();
-}
-unsafe impl Aligned for JsSymbol {
-    const ALIGNMENT: usize = align_of::<JsSymbol>();
-}
-unsafe impl Aligned for JsBigInt {
-    const ALIGNMENT: usize = align_of::<JsBigInt>();
-}
+mod raw;
+mod singlenan;
+use raw::*;
 
 /// The tag of the value.
-enum TagValue {
-    Null = 0,
+enum PrimitiveTag {
+    Null,
     Undefined,
     Boolean,
     Integer32,
@@ -37,13 +26,46 @@ enum TagValue {
     String,
 }
 
-#[derive(Clone, EnumPtr, Debug)]
-#[repr(C, usize)]
-enum TaggedInner {
-    Object(JsObject),
-    String(JsString),
-    Symbol(JsSymbol),
-    BigInt(JsBigInt),
+impl PrimitiveTag {
+    const fn raw(self) -> RawTag {
+        // SAFETY: Cannot fail as we define all valid variants of this enum.
+        unsafe {
+            match self {
+                PrimitiveTag::Null => RawTag::new_unchecked(false, 1),
+                PrimitiveTag::Undefined => RawTag::new_unchecked(false, 2),
+                PrimitiveTag::Boolean => RawTag::new_unchecked(false, 3),
+                PrimitiveTag::Integer32 => RawTag::new_unchecked(false, 4),
+                PrimitiveTag::BigInt => RawTag::new_unchecked(true, 1),
+                PrimitiveTag::Object => RawTag::new_unchecked(true, 2),
+                PrimitiveTag::Symbol => RawTag::new_unchecked(true, 3),
+                PrimitiveTag::String => RawTag::new_unchecked(true, 4),
+            }
+        }
+    }
+}
+
+impl Into<RawTag> for PrimitiveTag {
+    #[inline(always)]
+    fn into(self) -> RawTag {
+        self.raw()
+    }
+}
+
+impl Into<PrimitiveTag> for RawTag {
+    #[inline(always)]
+    fn into(self) -> PrimitiveTag {
+        match self.neg_val() {
+            (false, 1) => PrimitiveTag::Null,
+            (false, 2) => PrimitiveTag::Undefined,
+            (false, 3) => PrimitiveTag::Boolean,
+            (false, 4) => PrimitiveTag::Integer32,
+            (true, 1) => PrimitiveTag::BigInt,
+            (true, 2) => PrimitiveTag::Object,
+            (true, 3) => PrimitiveTag::Symbol,
+            (true, 4) => PrimitiveTag::String,
+            _ => unsafe { std::hint::unreachable_unchecked() },
+        }
+    }
 }
 
 /// A NaN-boxed [`JsValue`]'s inner.
@@ -103,15 +125,17 @@ impl NanBoxedValue {
     /// Returns a `InnerValue` from a Null.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn null() -> Self {
-        Self(RawBox::from_value(Value::empty(RawTag::new(false, TagValue::Null as _))))
+    pub(crate) const fn null() -> Self {
+        Self(RawBox::from_value(Value::empty(PrimitiveTag::Null.raw())))
     }
 
     /// Returns a `InnerValue` from an undefined.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn undefined() -> Self {
-        Self(NanBox::from(0u8))
+    pub(crate) const fn undefined() -> Self {
+        Self(RawBox::from_value(Value::empty(
+            PrimitiveTag::Undefined.raw(),
+        )))
     }
 
     /// Returns a `InnerValue` from a 64-bits float. If the float is `NaN`,
@@ -119,70 +143,92 @@ impl NanBoxedValue {
     #[must_use]
     #[inline(always)]
     pub(crate) const fn float64(value: f64) -> Self {
-        Self(NanBox::from(value))
+        Self(RawBox::from_float(value))
     }
 
     /// Returns a `InnerValue` from a 32-bits integer.
     #[must_use]
     #[inline(always)]
-    pub(crate) const fn integer32(value: i32) -> Self {
-        Self(NanBox::from(value))
+    pub(crate) fn integer32(value: i32) -> Self {
+        Self(RawBox::from_value(Value::store(
+            PrimitiveTag::Integer32.raw(),
+            value,
+        )))
     }
 
     /// Returns a `InnerValue` from a boolean.
     #[must_use]
     #[inline(always)]
-    pub(crate) const fn boolean(value: bool) -> Self {
-        Self(NanBox::from(value as u16))
+    pub(crate) fn boolean(value: bool) -> Self {
+        Self(RawBox::from_value(Value::store(
+            PrimitiveTag::Boolean.into(),
+            value,
+        )))
     }
 
     /// Returns a `InnerValue` from a boxed [`JsBigInt`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn bigint(value: JsBigInt) -> Self {
-        Self(NanBox::from(Box::new(TaggedInner::BigInt(value))))
+        let raw = value.into_raw();
+        Self(RawBox::from_value(Value::store(
+            PrimitiveTag::BigInt.into(),
+            raw,
+        )))
     }
 
     /// Returns a `InnerValue` from a boxed [`JsObject`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn object(value: JsObject) -> Self {
-        Self(NanBox::from(Box::new(TaggedInner::Object(value))))
+        let raw = value.into_raw();
+        Self(RawBox::from_value(Value::store(
+            PrimitiveTag::Object.into(),
+            raw.as_ptr(),
+        )))
     }
 
     /// Returns a `InnerValue` from a boxed [`JsSymbol`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn symbol(value: JsSymbol) -> Self {
-        Self(NanBox::from(Box::new(TaggedInner::Symbol(value))))
+        let raw = value.into_raw();
+        Self(RawBox::from_value(Value::store(
+            PrimitiveTag::Symbol.into(),
+            raw.as_ptr(),
+        )))
     }
 
     /// Returns a `InnerValue` from a boxed [`JsString`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn string(value: JsString) -> Self {
-        Self(NanBox::from(Box::new(TaggedInner::String(value))))
+        let raw = value.into_raw();
+        Self(RawBox::from_value(Value::store(
+            PrimitiveTag::String.into(),
+            raw.as_ptr(),
+        )))
     }
 
     /// Returns true if a value is undefined.
     #[must_use]
     #[inline(always)]
     pub(crate) fn is_undefined(&self) -> bool {
-        self.0.try_ref_inline::<u8>() == Some(&0)
+        self.0.tag() == Some(PrimitiveTag::Undefined.into())
     }
 
     /// Returns true if a value is null.
     #[must_use]
     #[inline(always)]
     pub(crate) fn is_null(&self) -> bool {
-        self.0.try_ref_inline::<u8>() == Some(&1)
+        self.0.tag() == Some(PrimitiveTag::Null.into())
     }
 
     /// Returns true if a value is a boolean.
     #[must_use]
     #[inline(always)]
     pub(crate) fn is_bool(&self) -> bool {
-        self.0.try_ref_inline::<u16>().is_some()
+        self.0.tag() == Some(PrimitiveTag::Boolean.into())
     }
 
     /// Returns true if a value is a 64-bits float.
@@ -196,143 +242,242 @@ impl NanBoxedValue {
     #[must_use]
     #[inline(always)]
     pub(crate) fn is_integer32(&self) -> bool {
-        self.0.try_ref_inline::<i32>().is_some()
+        self.0.tag() == Some(PrimitiveTag::Integer32.into())
     }
 
     /// Returns true if a value is a [`JsBigInt`]. A `NaN` will not match here.
     #[must_use]
     #[inline(always)]
     pub(crate) fn is_bigint(&self) -> bool {
-        matches!(self.0.try_ref_boxed(), Some(TaggedInner::BigInt(_)))
+        self.0.tag() == Some(PrimitiveTag::BigInt.into())
     }
 
     /// Returns true if a value is a boxed Object.
     #[must_use]
     #[inline(always)]
     pub(crate) fn is_object(&self) -> bool {
-        matches!(self.0.try_ref_boxed(), Some(TaggedInner::Object(_)))
+        self.0.tag() == Some(PrimitiveTag::Object.into())
     }
 
     /// Returns true if a value is a boxed Symbol.
     #[must_use]
     #[inline(always)]
     pub(crate) fn is_symbol(&self) -> bool {
-        matches!(self.0.try_ref_boxed(), Some(TaggedInner::Symbol(_)))
+        self.0.tag() == Some(PrimitiveTag::Symbol.into())
     }
 
     /// Returns true if a value is a boxed String.
     #[must_use]
     #[inline(always)]
     pub(crate) fn is_string(&self) -> bool {
-        matches!(self.0.try_ref_boxed(), Some(TaggedInner::String(_)))
+        self.0.tag() == Some(PrimitiveTag::String.into())
     }
 
     /// Returns the value as a f64 if it is a float.
     #[must_use]
     #[inline(always)]
     pub(crate) fn as_float64(&self) -> Option<f64> {
-        self.0.try_ref_float().copied()
+        self.0.float().copied()
     }
 
     /// Returns the value as an i32 if it is an integer.
     #[must_use]
     #[inline(always)]
     pub(crate) fn as_integer32(&self) -> Option<i32> {
-        self.0.try_ref_inline().copied()
+        if self.is_integer32() {
+            self.0.value().map(i32::from_val)
+        } else {
+            None
+        }
     }
 
     /// Returns the value as a boolean if it is a boolean.
     #[must_use]
     #[inline(always)]
     pub(crate) fn as_bool(&self) -> Option<bool> {
-        self.0.try_ref_inline::<u16>().copied().map(|v| v != 0)
+        if self.is_bool() {
+            self.0.value().map(bool::from_val)
+        } else {
+            None
+        }
     }
 
     /// Returns the value as a boxed [`JsBigInt`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn as_bigint(&self) -> Option<JsBigInt> {
-        self.0.try_ref_boxed().and_then(|inner| {
-            if let TaggedInner::BigInt(v) = inner {
-                Some(v.clone())
-            } else {
-                None
-            }
-        })
+        if self.is_bigint() {
+            self.0.value().map(|v| {
+                let raw = RawStore::from_val(v);
+                unsafe { JsBigInt::from_raw(raw) }
+            })
+        } else {
+            None
+        }
     }
 
     /// Returns the value as a boxed [`JsObject`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn as_object(&self) -> Option<JsObject> {
-        self.0.try_ref_boxed().and_then(|inner| {
-            if let TaggedInner::Object(v) = inner {
-                Some(v.clone())
-            } else {
-                None
-            }
-        })
+        if self.is_object() {
+            self.0.value().map(|v| {
+                let raw: *mut _ = RawStore::from_val(v);
+                let raw = unsafe { NonNull::new_unchecked(raw) };
+                unsafe { JsObject::from_raw(raw) }
+            })
+        } else {
+            None
+        }
     }
 
     /// Returns the value as a [`JsSymbol`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn as_symbol(&self) -> Option<JsSymbol> {
-        self.0.try_ref_boxed().and_then(|inner| {
-            if let TaggedInner::Symbol(v) = inner {
-                Some(v.clone())
-            } else {
-                None
-            }
-        })
+        if self.is_symbol() {
+            self.0.value().map(|v| {
+                let raw: *mut _ = RawStore::from_val(v);
+                let raw = unsafe { NonNull::new_unchecked(raw) };
+                unsafe { JsSymbol::from_raw(raw) }
+            })
+        } else {
+            None
+        }
     }
 
     /// Returns the value as a boxed [`JsString`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn as_string(&self) -> Option<JsString> {
-        self.0.try_ref_boxed().and_then(|inner| {
-            if let TaggedInner::String(v) = inner {
-                Some(v.clone())
-            } else {
-                None
-            }
-        })
+        if self.is_string() {
+            self.0.value().map(|v| {
+                let raw: *mut _ = RawStore::from_val(v);
+                let raw = unsafe { NonNull::new_unchecked(raw) };
+                unsafe { JsString::from_raw(raw) }
+            })
+        } else {
+            None
+        }
     }
 
     /// Returns the [`JsVariant`] of this inner value.
     #[must_use]
     #[inline(always)]
     pub(crate) fn as_variant(&self) -> JsVariant {
-        if self.is_null() {
-            JsVariant::Null
-        } else if self.is_undefined() {
-            JsVariant::Undefined
+        match self.0.tag().map(|t: RawTag| -> PrimitiveTag { t.into() }) {
+            None => JsVariant::Float64(self.as_float64().unwrap()),
+            Some(PrimitiveTag::Null) => JsVariant::Null,
+            Some(PrimitiveTag::Undefined) => JsVariant::Undefined,
+            Some(PrimitiveTag::Boolean) => {
+                JsVariant::Boolean(bool::from_val(self.0.value().unwrap()))
+            }
+            Some(PrimitiveTag::Integer32) => {
+                JsVariant::Integer32(i32::from_val(self.0.value().unwrap()))
+            }
+            Some(PrimitiveTag::BigInt) => JsVariant::BigInt(self.as_bigint().unwrap()),
+            Some(PrimitiveTag::Object) => JsVariant::Object(self.as_object().unwrap()),
+            Some(PrimitiveTag::Symbol) => JsVariant::Symbol(self.as_symbol().unwrap()),
+            Some(PrimitiveTag::String) => JsVariant::String(self.as_string().unwrap()),
         }
-        if let Some(b) = self.as_bool() {
-            JsVariant::Boolean(b)
-        } else if let
+    }
+
+    /// Returns the value as a [`JsBigInt`] without checking the inner tag.
+    ///
+    /// # Safety
+    ///
+    /// The inner value must be a valid `JsBigInt`.
+    #[must_use]
+    #[inline(always)]
+    unsafe fn as_bigint_unchecked(&self) -> ManuallyDrop<JsBigInt> {
+        // let addr = bits::untag_pointer(self.value());
+        // // SAFETY: This is guaranteed by the caller.
+        // unsafe {
+        //     ManuallyDrop::new(JsBigInt::from_raw(
+        //         self.ptr.with_addr(addr).cast::<RawBigInt>().cast_const(),
+        //     ))
+        // }
+        todo!();
+    }
+
+    /// Returns the value as a boxed [`JsObject`] without checking the inner tag.
+    ///
+    /// # Safety
+    ///
+    /// The inner value must be a valid `JsObject`.
+    #[must_use]
+    #[inline(always)]
+    unsafe fn as_object_unchecked(&self) -> ManuallyDrop<JsObject> {
+        // let addr = self.0.value().unwrap();
+        // let addr:
+        // // SAFETY: This is guaranteed by the caller.
+        // unsafe {
+        //     ManuallyDrop::new(JsObject::from_raw(NonNull::new_unchecked(
+        //         self.ptr.with_addr(addr).cast::<GcBox<ErasedVTableObject>>(),
+        //     )))
+        // }
+        todo!();
+    }
+
+    /// Returns the value as a [`JsSymbol`] without checking the inner tag.
+    ///
+    /// # Safety
+    ///
+    /// The inner value must be a valid `JsSymbol`.
+    #[must_use]
+    #[inline(always)]
+    unsafe fn as_symbol_unchecked(&self) -> ManuallyDrop<JsSymbol> {
+        // let addr = bits::untag_pointer(self.value());
+        // // SAFETY: This is guaranteed by the caller.
+        // unsafe {
+        //     ManuallyDrop::new(JsSymbol::from_raw(NonNull::new_unchecked(
+        //         self.ptr.with_addr(addr).cast::<RawJsSymbol>(),
+        //     )))
+        // }
+        todo!();
+    }
+
+    /// Returns the value as a [`JsString`] without checking the inner tag.
+    ///
+    /// # Safety
+    ///
+    /// The inner value must be a valid `JsString`.
+    #[must_use]
+    #[inline(always)]
+    unsafe fn as_string_unchecked(&self) -> ManuallyDrop<JsString> {
+        // let addr = bits::untag_pointer(self.value());
+        // // SAFETY: the inner address must hold a valid, non-null JsString.
+        // unsafe {
+        //     ManuallyDrop::new(JsString::from_raw(NonNull::new_unchecked(
+        //         self.ptr.with_addr(addr).cast::<RawJsString>(),
+        //     )))
+        // }
+        todo!();
     }
 }
 
 impl Drop for NanBoxedValue {
     #[inline(always)]
     fn drop(&mut self) {
-        match self.value() & bits::MASK_KIND {
-            bits::MASK_OBJECT => {
-                unsafe { ManuallyDrop::into_inner(self.as_object_unchecked()) };
-            }
-            bits::MASK_STRING => {
-                unsafe { ManuallyDrop::into_inner(self.as_string_unchecked()) };
-            }
-            bits::MASK_SYMBOL => {
-                unsafe { ManuallyDrop::into_inner(self.as_symbol_unchecked()) };
-            }
-            bits::MASK_BIGINT => {
-                unsafe { ManuallyDrop::into_inner(self.as_bigint_unchecked()) };
-            }
-            _ => {}
-        }
+        // if let Some(obj) = self.as_object() {
+        //     unsafe { ManuallyDrop::into_inner(obj) };
+        // }
+        //
+        // match self.value() & bits::MASK_KIND {
+        //     bits::MASK_OBJECT => {
+        //         unsafe { ManuallyDrop::into_inner(self.as_object_unchecked()) };
+        //     }
+        //     bits::MASK_STRING => {
+        //         unsafe { ManuallyDrop::into_inner(self.as_string_unchecked()) };
+        //     }
+        //     bits::MASK_SYMBOL => {
+        //         unsafe { ManuallyDrop::into_inner(self.as_symbol_unchecked()) };
+        //     }
+        //     bits::MASK_BIGINT => {
+        //         unsafe { ManuallyDrop::into_inner(self.as_bigint_unchecked()) };
+        //     }
+        //     _ => {}
+        // }
     }
 }
 

@@ -1,6 +1,6 @@
 //! A NaN-boxed inner value for JavaScript values.
 //!
-//! This [`JsValue`] is a float using `NaN` values to represent inner
+//! This [`JsValue`] is a float using `NaN` values to represent an inner
 //! JavaScript value.
 //!
 //! # Assumptions
@@ -11,7 +11,7 @@
 //! The first assumption is easy to verify: JavaScript numbers must be 64 bits
 //! IEEE-754, which is guaranteed by Rust and JavaScript implementations.
 //!
-//! The second assumption is that pointers are 48 bits maximum. This is a bit
+//! The second assumption is that pointers are at most 48 bits. This is a bit
 //! more complex to verify, but it is a safe assumption for all current
 //! architectures. The only exception is RISC-V and Intel processors that
 //! enable 5-level paging extensions.
@@ -19,13 +19,13 @@
 //! This is clarified here: <https://en.m.wikipedia.org/wiki/64-bit_computing>:
 //!
 //! > not all 64-bit instruction sets support full 64-bit virtual memory
-//! > addresses; x86-64 and AArch64 for example, support only 48 bits of
+//! > addresses; x86-64 and AArch64, for example, support only 48 bits of
 //! > virtual address, with the remaining 16 bits of the virtual address
 //! > required to be all zeros (000...) or all ones (111...), and several
 //! > 64-bit instruction sets support fewer than 64 bits of physical
 //! > memory address.
 //!
-//! ALL 32 bits architectures are compatible, of course, as their pointers
+//! ALL 32-bit architectures are compatible, of course, as their pointers
 //! are 32 bits.
 //!
 //! WASM with MEMORY64 (which is very rare) follows the pointer structure
@@ -36,11 +36,11 @@
 //! This leaves RISC-V and processes that enable 5-level paging extensions
 //! on Intel (<https://en.m.wikipedia.org/wiki/Intel_5-level_paging>).
 //!
-//! We could feature gate on RISC-V, but it's not worth it. The only
+//! We could feature a gate on RISC-V, but it's not worth it. The only
 //! RISC-V processors that support 64-bit are the ones that support 64-bit
 //! virtual memory addresses. So it's a safe assumption.
 //!
-//! There is no way to feature gate on 5-level paging as it's a software
+//! There is no way to feature a gate on 5-level paging as it's a software
 //! trigger.
 //!
 //! There is a software assertion in the code that will panic if the pointer
@@ -48,17 +48,17 @@
 //!
 //! # Design
 //!
-//! This [`JsValue`] inner type is a NaN-boxed value, which is a 64-bits value
+//! This [`JsValue`] inner type is a NaN-boxed value, which is a 64-bit value
 //! that can represent any JavaScript value. If the integer is a non-NaN value,
-//! it will be stored as a 64-bits float. If it is a `f64::NAN` value, it will
+//! it will be stored as a 64-bit float. If it is an `f64::NAN` value, it will
 //! be stored as a quiet `NaN` value. Subnormal numbers are regular float.
 //!
-//! For any other type of values, the value will be stored as a 51-bits non-zero
+//! For any other type of values, the value will be stored as a 48-bit non-zero
 //! integer.
 //!
 //! In short, the memory layout of a NaN-boxed value is as follows:
 //!
-//! | Type of           | Bit Layout | Comment |
+//! | Type              | Bit Layout | Comment |
 //! |-------------------|------------|---------|
 //! | `+Infinity`       | `7FF0:0000:0000:0000`    | |
 //! | `-Infinity`       | `FFF0:0000:0000:0000`    | |
@@ -139,7 +139,6 @@ const _NAN_BOX_COMPAT_CHECK: () = const {
 ///
 /// All bit magic is done here.
 mod bits {
-
     /// The mask for the bits that indicate if the value is a NaN-value.
     const MASK_NAN: u64 = 0x7FF0_0000_0000_0000;
 
@@ -299,11 +298,81 @@ const_assert!(f64::from_bits(bits::MASK_STRING).is_nan());
 const_assert!(f64::from_bits(bits::MASK_SYMBOL).is_nan());
 const_assert!(f64::from_bits(bits::MASK_BIGINT).is_nan());
 
+/// Tagged tuple to make it easy to extract the tag.
+/// The first element should always be `7F`, and the second will be
+/// `FX` (where X is the tag, value from 8-F). The third value
+/// is only used for pointers, and the last one is the integer
+/// remainder.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(transparent)]
+struct Header(u16);
+
+impl Header {
+    const INTEGER_32: u16 = 0x7FF9;
+    pub fn integer32() -> Self {
+        Self(Self::INTEGER_32)
+    }
+
+    const BOOLEAN: u16 = 0x7FFA;
+    pub fn boolean() -> Self {
+        Self(Self::BOOLEAN)
+    }
+
+    const NULL_OR_UNDEFINED: u16 = 0x7FFB;
+    pub fn null_or_undefined() -> Self {
+        Self(Self::NULL_OR_UNDEFINED)
+    }
+
+    const OBJECT: u16 = 0x7FFC;
+    pub fn object() -> Self {
+        Self(Self::OBJECT)
+    }
+
+    const STRING: u16 = 0x7FFD;
+    pub fn string() -> Self {
+        Self(Self::STRING)
+    }
+
+    const SYMBOL: u16 = 0x7FFE;
+    pub fn symbol() -> Self {
+        Self(Self::SYMBOL)
+    }
+
+    const BIG_INT: u16 = 0x7FFF;
+    pub fn big_int() -> Self {
+        Self(Self::BIG_INT)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+#[repr(C, align(8))]
+pub struct Inner {
+    #[cfg(target_endian = "big")]
+    header: Header,
+    #[cfg(target_endian = "big")]
+    spacer: u16,
+
+    data: i32,
+
+    #[cfg(target_endian = "little")]
+    spacer: u16,
+    #[cfg(target_endian = "little")]
+    header: Header,
+}
+
 /// A NaN-boxed [`JsValue`]'s inner.
-pub(crate) struct NanBoxedValue {
+#[repr(C)]
+pub(crate) union NanBoxedValue {
     #[cfg(target_pointer_width = "32")]
-    half: u32,
+    ptr: (u32, *mut ()),
+
+    #[cfg(target_pointer_width = "64")]
     ptr: *mut (),
+
+    inner: Inner,
+
+    bits: u64,
+    float: f64,
 }
 
 impl fmt::Debug for NanBoxedValue {
@@ -351,11 +420,7 @@ impl Clone for NanBoxedValue {
         } else if let Some(s) = self.as_symbol() {
             Self::symbol(s.clone())
         } else {
-            Self {
-                #[cfg(target_pointer_width = "32")]
-                half: self.half,
-                ptr: self.ptr,
-            }
+            unsafe { Self { bits: self.bits } }
         }
     }
 }
@@ -377,41 +442,49 @@ impl NanBoxedValue {
     /// pointer.
     ///
     /// This preserves the provenance of the original pointer.
-    fn from_object_like<T>(ptr: *mut T, addr: u64) -> Self {
-        Self {
+    #[inline(always)]
+    const fn from_object_like<T>(ptr: *mut T, header: u16) -> Self {
+        let mut s = Self {
             #[cfg(target_pointer_width = "32")]
-            half: (addr >> 32) as u32,
-            ptr: ptr.cast::<()>().with_addr(addr as usize),
-        }
+            ptr: (0, ptr.cast::<()>()),
+
+            #[cfg(target_pointer_width = "64")]
+            ptr: ptr.cast::<()>(),
+        };
+        unsafe { s.inner.header = Header(header) };
+        s
     }
 
     /// Returns the value contained within this structure as a `u64`.
     #[must_use]
     #[inline(always)]
     fn value(&self) -> u64 {
-        let value = self.ptr.addr() as u64;
+        #[cfg(target_pointer_width = "64")]
+        unsafe {
+            self.ptr.addr() as u64
+        }
 
         #[cfg(target_pointer_width = "32")]
-        let value = ((self.half as u64) << 32) | value;
-
-        value
+        unsafe {
+            ((self.ptr.0 as u64) << 32) | self.ptr.1 as u64
+        }
     }
 
-    /// Returns a `InnerValue` from a Null.
+    /// Returns an `InnerValue` from a Null.
     #[must_use]
     #[inline(always)]
     pub(crate) const fn null() -> Self {
         Self::from_inner_unchecked(bits::VALUE_NULL)
     }
 
-    /// Returns a `InnerValue` from an undefined.
+    /// Returns an `InnerValue` from an undefined value.
     #[must_use]
     #[inline(always)]
     pub(crate) const fn undefined() -> Self {
         Self::from_inner_unchecked(bits::VALUE_UNDEFINED)
     }
 
-    /// Returns a `InnerValue` from a 64-bits float. If the float is `NaN`,
+    /// Returns an `InnerValue` from a 64-bits float. If the float is `NaN`,
     /// it will be reduced to a canonical `NaN` representation.
     #[must_use]
     #[inline(always)]
@@ -419,125 +492,126 @@ impl NanBoxedValue {
         Self::from_inner_unchecked(bits::tag_f64(value))
     }
 
-    /// Returns a `InnerValue` from a 32-bits integer.
+    /// Returns an `InnerValue` from a 32-bits integer.
     #[must_use]
     #[inline(always)]
     pub(crate) const fn integer32(value: i32) -> Self {
         Self::from_inner_unchecked(bits::tag_i32(value))
     }
 
-    /// Returns a `InnerValue` from a boolean.
+    /// Returns an `InnerValue` from a boolean.
     #[must_use]
     #[inline(always)]
     pub(crate) const fn boolean(value: bool) -> Self {
         Self::from_inner_unchecked(bits::tag_bool(value))
     }
 
-    /// Returns a `InnerValue` from a boxed [`JsBigInt`].
+    /// Returns an `InnerValue` from a boxed [`JsBigInt`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn bigint(value: JsBigInt) -> Self {
         let ptr = value.into_raw().cast_mut();
-        let addr = bits::tag_pointer(ptr, bits::MASK_BIGINT);
-        Self::from_object_like(ptr, addr)
+        Self::from_object_like(ptr, Header::BIG_INT)
     }
 
-    /// Returns a `InnerValue` from a boxed [`JsObject`].
+    /// Returns an `InnerValue` from a boxed [`JsObject`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn object(value: JsObject) -> Self {
         let ptr = value.into_raw().as_ptr();
         let addr = bits::tag_pointer(ptr, bits::MASK_OBJECT);
-        Self::from_object_like(ptr, addr)
+        Self::from_object_like(ptr, Header::OBJECT)
     }
 
-    /// Returns a `InnerValue` from a boxed [`JsSymbol`].
+    /// Returns an `InnerValue` from a boxed [`JsSymbol`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn symbol(value: JsSymbol) -> Self {
         let ptr = value.into_raw().as_ptr();
         let addr = bits::tag_pointer(ptr, bits::MASK_SYMBOL);
-        Self::from_object_like(ptr, addr)
+        Self::from_object_like(ptr, Header::SYMBOL)
     }
 
-    /// Returns a `InnerValue` from a boxed [`JsString`].
+    /// Returns an `InnerValue` from a boxed [`JsString`].
     #[must_use]
     #[inline(always)]
     pub(crate) fn string(value: JsString) -> Self {
         let ptr = value.into_raw().as_ptr();
         let addr = bits::tag_pointer(ptr, bits::MASK_STRING);
-        Self::from_object_like(ptr, addr)
+        Self::from_object_like(ptr, Header::STRING)
     }
 
     /// Returns true if a value is undefined.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn is_undefined(&self) -> bool {
-        self.value() == bits::VALUE_UNDEFINED
+    pub(crate) const fn is_undefined(&self) -> bool {
+        unsafe { self.bits == bits::VALUE_UNDEFINED }
     }
 
     /// Returns true if a value is null.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn is_null(&self) -> bool {
-        self.value() == bits::VALUE_NULL
+    pub(crate) const fn is_null(&self) -> bool {
+        unsafe { self.bits == bits::VALUE_NULL }
     }
 
     /// Returns true if a value is a boolean.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn is_bool(&self) -> bool {
-        bits::is_bool(self.value())
+    pub(crate) const fn is_bool(&self) -> bool {
+        unsafe { self.inner.header.0 == Header::BOOLEAN }
     }
 
     /// Returns true if a value is a 64-bits float.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn is_float64(&self) -> bool {
-        bits::is_float(self.value())
+    pub(crate) const fn is_float64(&self) -> bool {
+        unsafe {
+            !self.float.is_nan() || self.bits & 0x7FFF_0000_0000_0000 == 0x7FF8_0000_0000_0000
+        }
     }
 
     /// Returns true if a value is a 32-bits integer.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn is_integer32(&self) -> bool {
-        bits::is_integer32(self.value())
+    pub(crate) const fn is_integer32(&self) -> bool {
+        unsafe { self.inner.header.0 == Header::INTEGER_32 }
     }
 
     /// Returns true if a value is a [`JsBigInt`]. A `NaN` will not match here.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn is_bigint(&self) -> bool {
-        bits::is_bigint(self.value())
+    pub(crate) const fn is_bigint(&self) -> bool {
+        unsafe { self.inner.header.0 == Header::BIG_INT }
     }
 
     /// Returns true if a value is a boxed Object.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn is_object(&self) -> bool {
-        bits::is_object(self.value())
+    pub(crate) const fn is_object(&self) -> bool {
+        unsafe { self.inner.header.0 == Header::OBJECT }
     }
 
     /// Returns true if a value is a boxed Symbol.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn is_symbol(&self) -> bool {
-        bits::is_symbol(self.value())
+    pub(crate) const fn is_symbol(&self) -> bool {
+        unsafe { self.inner.header.0 == Header::SYMBOL }
     }
 
     /// Returns true if a value is a boxed String.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn is_string(&self) -> bool {
-        bits::is_string(self.value())
+    pub(crate) const fn is_string(&self) -> bool {
+        unsafe { self.inner.header.0 == Header::STRING }
     }
 
-    /// Returns the value as a f64 if it is a float.
+    /// Returns the value as a 64-bit float if it is a float.
     #[must_use]
     #[inline(always)]
     pub(crate) fn as_float64(&self) -> Option<f64> {
         if self.is_float64() {
-            Some(f64::from_bits(self.value()))
+            Some(unsafe { self.float })
         } else {
             None
         }
@@ -546,21 +620,19 @@ impl NanBoxedValue {
     /// Returns the value as an i32 if it is an integer.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn as_integer32(&self) -> Option<i32> {
-        if self.is_integer32() {
-            Some(bits::untag_i32(self.value()))
-        } else {
-            None
+    pub(crate) const fn as_integer32(&self) -> Option<i32> {
+        match unsafe { self.inner.header.0 } {
+            Header::INTEGER_32 => Some(unsafe { self.inner.data }),
+            _ => None,
         }
     }
 
     /// Returns the value as a boolean if it is a boolean.
     #[must_use]
     #[inline(always)]
-    pub(crate) fn as_bool(&self) -> Option<bool> {
-        match self.value() {
-            bits::VALUE_FALSE => Some(false),
-            bits::VALUE_TRUE => Some(true),
+    pub(crate) const fn as_bool(&self) -> Option<bool> {
+        match unsafe { self.inner.header.0 } {
+            Header::BOOLEAN => Some(unsafe { self.inner.data } != 0),
             _ => None,
         }
     }
@@ -589,7 +661,7 @@ impl NanBoxedValue {
         // SAFETY: This is guaranteed by the caller.
         unsafe {
             ManuallyDrop::new(JsBigInt::from_raw(
-                self.ptr.with_addr(addr).cast::<RawBigInt>().cast_const(),
+                self.ptr.with_addr(addr).cast::<RawBigInt>(),
             ))
         }
     }
@@ -685,25 +757,20 @@ impl NanBoxedValue {
     #[must_use]
     #[inline(always)]
     pub(crate) fn as_variant(&self) -> JsVariant {
-        match self.value() & bits::MASK_KIND {
-            bits::MASK_OBJECT => {
-                JsVariant::Object(unsafe { (*self.as_object_unchecked()).clone() })
+        match unsafe { self.inner.header.0 } {
+            Header::OBJECT => JsVariant::Object(unsafe { (*self.as_object_unchecked()).clone() }),
+            Header::STRING => JsVariant::String(unsafe { (*self.as_string_unchecked()).clone() }),
+            Header::SYMBOL => JsVariant::Symbol(unsafe { (*self.as_symbol_unchecked()).clone() }),
+            Header::BIG_INT => JsVariant::BigInt(unsafe { (*self.as_bigint_unchecked()).clone() }),
+            Header::INTEGER_32 => JsVariant::Integer32(bits::untag_i32(self.value())),
+            Header::BOOLEAN => JsVariant::Boolean(bits::untag_bool(self.value())),
+            Header::NULL_OR_UNDEFINED => {
+                if unsafe { self.inner.data } == 0 {
+                    JsVariant::Null
+                } else {
+                    JsVariant::Undefined
+                }
             }
-            bits::MASK_STRING => {
-                JsVariant::String(unsafe { (*self.as_string_unchecked()).clone() })
-            }
-            bits::MASK_SYMBOL => {
-                JsVariant::Symbol(unsafe { (*self.as_symbol_unchecked()).clone() })
-            }
-            bits::MASK_BIGINT => {
-                JsVariant::BigInt(unsafe { (*self.as_bigint_unchecked()).clone() })
-            }
-            bits::MASK_INT32 => JsVariant::Integer32(bits::untag_i32(self.value())),
-            bits::MASK_BOOLEAN => JsVariant::Boolean(bits::untag_bool(self.value())),
-            bits::MASK_OTHER => match self.value() {
-                bits::VALUE_NULL => JsVariant::Null,
-                _ => JsVariant::Undefined,
-            },
             _ => JsVariant::Float64(f64::from_bits(self.value())),
         }
     }

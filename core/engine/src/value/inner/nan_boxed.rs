@@ -466,7 +466,7 @@ impl NanBoxedValue {
 
         #[cfg(target_pointer_width = "32")]
         unsafe {
-            ((self.ptr.0 as u64) << 32) | self.ptr.1 as u64
+            self.ptr.1.addr() as u64
         }
     }
 
@@ -519,7 +519,6 @@ impl NanBoxedValue {
     #[inline(always)]
     pub(crate) fn object(value: JsObject) -> Self {
         let ptr = value.into_raw().as_ptr();
-        let addr = bits::tag_pointer(ptr, bits::MASK_OBJECT);
         Self::from_object_like(ptr, Header::OBJECT)
     }
 
@@ -528,7 +527,6 @@ impl NanBoxedValue {
     #[inline(always)]
     pub(crate) fn symbol(value: JsSymbol) -> Self {
         let ptr = value.into_raw().as_ptr();
-        let addr = bits::tag_pointer(ptr, bits::MASK_SYMBOL);
         Self::from_object_like(ptr, Header::SYMBOL)
     }
 
@@ -537,7 +535,6 @@ impl NanBoxedValue {
     #[inline(always)]
     pub(crate) fn string(value: JsString) -> Self {
         let ptr = value.into_raw().as_ptr();
-        let addr = bits::tag_pointer(ptr, bits::MASK_STRING);
         Self::from_object_like(ptr, Header::STRING)
     }
 
@@ -661,7 +658,7 @@ impl NanBoxedValue {
         // SAFETY: This is guaranteed by the caller.
         unsafe {
             ManuallyDrop::new(JsBigInt::from_raw(
-                self.ptr.with_addr(addr).cast::<RawBigInt>(),
+                self.ptr.with_addr(addr).cast::<RawBigInt>().cast_const(),
             ))
         }
     }

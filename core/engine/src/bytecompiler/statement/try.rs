@@ -64,9 +64,8 @@ impl ByteCompiler<'_> {
         // Compile try block
         self.compile_block(t.block(), use_expr);
 
-        if let Some((finally_re_throw, finally_jump_index)) = variant.finaly_re_throw_register() {
+        if let Some((finally_re_throw, _)) = variant.finaly_re_throw_register() {
             self.bytecode.emit_push_false(finally_re_throw.variable());
-            // self.bytecode.emit_push_zero(finally_jump_index.variable());
         }
 
         let finally = self.jump();

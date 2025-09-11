@@ -112,6 +112,7 @@ pub use console::{Console, ConsoleState, DefaultLogger, Logger, NullLogger};
 
 pub mod clone;
 #[cfg(feature = "fetch")]
+pub mod event;
 pub mod fetch;
 pub mod interval;
 pub mod microtask;

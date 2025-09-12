@@ -17,6 +17,16 @@ pub trait RuntimeExtension: Debug {
     fn register(self, realm: Option<Realm>, context: &mut Context) -> JsResult<()>;
 }
 
+/// Register the `Event` related classes.
+#[derive(Copy, Clone, Debug)]
+pub struct EventExtension;
+
+impl RuntimeExtension for EventExtension {
+    fn register(self, realm: Option<Realm>, context: &mut Context) -> JsResult<()> {
+        crate::event::register(realm, context)
+    }
+}
+
 /// Register the Timeout/Interval functions.
 #[derive(Copy, Clone, Debug)]
 pub struct TimeoutExtension;

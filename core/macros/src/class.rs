@@ -12,9 +12,21 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit_mut::VisitMut;
 use syn::{
-    Attribute, ConstParam, Expr, FnArg, GenericParam, Ident, ImplItemFn, ItemImpl, LifetimeParam,
-    Lit, Meta, MetaNameValue, PatType, Receiver, ReturnType, Signature, Token, Type, TypeParam,
+    Attribute, ConstParam, Expr, FnArg, GenericParam, Ident, ImplItemConst, ImplItemFn, ItemImpl,
+    LifetimeParam, Lit, Meta, MetaNameValue, PatType, Receiver, ReturnType, Signature, Token, Type,
+    TypeParam,
 };
+
+/// Returns the name of a property from its identifier. If the identifier is "raw"
+/// (starts with `r#`), remove the prefix.
+fn name_from_ident(ident: &Ident) -> String {
+    let name = ident.to_string();
+    if let Some(rest) = name.strip_prefix("r#") {
+        rest.to_string()
+    } else {
+        name
+    }
+}
 
 /// A function representation. Takes a function from the AST and remember its name, length and
 /// how its body should be in the output AST.
@@ -395,11 +407,35 @@ impl Accessor {
     }
 }
 
+/// A value recorded, including its original stream and the value stream part.
+///
+/// This is created with `const VALUE_NAME: SomeType = SomeValue;`. It is
+/// expected that `SomeType` in this case implements `TryIntoJs`.
+#[derive(Debug)]
+struct Value {
+    /// The original name of the value.
+    original_name: Ident,
+
+    /// The type.
+    type_: Type,
+}
+
+impl Value {
+    fn new(item: &mut ImplItemConst) -> Self {
+        Self {
+            original_name: item.ident.clone(),
+            type_: item.ty.clone(),
+        }
+    }
+}
+
 /// A visitor for the `impl X { ... }` block. This will record all top-level functions
 /// and create endpoints for the JavaScript class.
 #[derive(Debug)]
 struct ClassVisitor {
-    renaming: RenameScheme,
+    renaming_all: RenameScheme,
+
+    renaming_static_values: RenameScheme,
 
     // The type name for this class.
     type_: Type,
@@ -409,6 +445,9 @@ struct ClassVisitor {
 
     // All static functions recorded.
     statics: Vec<Function>,
+
+    // All static values recorded.
+    static_values: BTreeMap<String, Value>,
 
     // All methods recorded.
     methods: Vec<Function>,
@@ -421,21 +460,37 @@ struct ClassVisitor {
 }
 
 impl ClassVisitor {
-    fn new(renaming: RenameScheme, type_: Type) -> Self {
+    fn new(renaming_all: RenameScheme, renaming_static_values: RenameScheme, type_: Type) -> Self {
         Self {
-            renaming,
+            renaming_all,
+            renaming_static_values,
             type_,
             constructor: None,
             statics: Vec::new(),
+            static_values: BTreeMap::new(),
             methods: Vec::new(),
             accessors: BTreeMap::default(),
             errors: None,
         }
     }
 
-    fn name_of(&self, fn_: &mut ImplItemFn) -> SpannedResult<String> {
+    fn name_of_const(&self, const_: &mut ImplItemConst) -> SpannedResult<String> {
+        take_name_value_attr(&mut const_.attrs, "rename").map_or_else(
+            || {
+                Ok(self
+                    .renaming_static_values
+                    .rename(name_from_ident(&const_.ident)))
+            },
+            |nv| match &nv {
+                Lit::Str(s) => Ok(s.value()),
+                _ => error(&nv, "Invalid attribute value literal"),
+            },
+        )
+    }
+
+    fn name_of_fn(&self, fn_: &mut ImplItemFn) -> SpannedResult<String> {
         take_name_value_attr(&mut fn_.attrs, "rename").map_or_else(
-            || Ok(self.renaming.rename(fn_.sig.ident.to_string())),
+            || Ok(self.renaming_all.rename(name_from_ident(&fn_.sig.ident))),
             |nv| match &nv {
                 Lit::Str(s) => Ok(s.value()),
                 _ => error(&nv, "Invalid attribute value literal"),
@@ -449,7 +504,7 @@ impl ClassVisitor {
         explicit_static: bool,
         fn_: &mut ImplItemFn,
     ) -> SpannedResult<()> {
-        let name = self.name_of(fn_)?;
+        let name = self.name_of_fn(fn_)?;
         let f = Function::method(
             name,
             explicit_method,
@@ -468,7 +523,7 @@ impl ClassVisitor {
     }
 
     fn getter(&mut self, fn_: &mut ImplItemFn) -> SpannedResult<()> {
-        let name = self.name_of(fn_)?;
+        let name = self.name_of_fn(fn_)?;
         self.accessors
             .entry(name.clone())
             .or_default()
@@ -478,7 +533,7 @@ impl ClassVisitor {
     }
 
     fn setter(&mut self, fn_: &mut ImplItemFn) -> SpannedResult<()> {
-        let name = self.name_of(fn_)?;
+        let name = self.name_of_fn(fn_)?;
         self.accessors
             .entry(name.clone())
             .or_default()
@@ -488,6 +543,12 @@ impl ClassVisitor {
 
     fn constructor(&mut self, fn_: &mut ImplItemFn) -> SpannedResult<()> {
         self.constructor = Some(Function::constructor(fn_, &self.type_)?);
+        Ok(())
+    }
+
+    fn static_value(&mut self, const_: &mut ImplItemConst) -> SpannedResult<()> {
+        let name = self.name_of_const(const_)?;
+        self.static_values.insert(name, Value::new(const_));
         Ok(())
     }
 
@@ -545,6 +606,26 @@ impl ClassVisitor {
             }
         });
 
+        let builder_static_values = self.static_values.iter().map(|(name, value)| {
+            let name_str = name.as_str();
+            let ty_ = &value.type_;
+            let original_name = &value.original_name;
+
+            quote! {
+                    let value = < #ty_ as boa_engine::value::TryIntoJs >::try_into_js(
+                        &( Self:: #original_name ),
+                        builder.context()
+                    )?;
+                    builder.static_property(
+                        boa_engine::js_string!( #name_str ),
+                        value,
+                        boa_engine::property::Attribute::ENUMERABLE
+                        | boa_engine::property::Attribute::READONLY
+                        | boa_engine::property::Attribute::PERMANENT,
+                    );
+            }
+        });
+
         let constructor_body = self.constructor.as_ref().map_or_else(
             || {
                 quote! {
@@ -571,6 +652,9 @@ impl ClassVisitor {
                     // Add all statics.
                     #(#builder_statics)*
 
+                    // Add all statics properties.
+                    #(#builder_static_values)*
+
                     // Add all accessors.
                     #(#accessors)*
 
@@ -585,6 +669,14 @@ impl ClassVisitor {
 }
 
 impl VisitMut for ClassVisitor {
+    fn visit_impl_item_const_mut(&mut self, item: &mut ImplItemConst) {
+        if let Err((span, msg)) = self.static_value(item) {
+            self.error(span, msg);
+        }
+
+        syn::visit_mut::visit_impl_item_const_mut(self, item);
+    }
+
     // Allow similar names as there are no better ways to name `getter` and `setter`.
     #[allow(clippy::similar_names)]
     fn visit_impl_item_fn_mut(&mut self, item: &mut ImplItemFn) {
@@ -658,7 +750,7 @@ pub(crate) fn class_impl(attr: TokenStream, input: TokenStream) -> TokenStream {
     // Parse the input.
     let mut impl_ = syn::parse_macro_input!(input as ItemImpl);
 
-    let renaming = match RenameScheme::from_named_attrs(&mut impl_.attrs, "rename_all") {
+    let renaming_all = match RenameScheme::from_named_attrs(&mut impl_.attrs, "rename_all") {
         Ok(Some(r)) => r,
         Ok(None) => RenameScheme::CamelCase,
         Err((span, msg)) => {
@@ -666,8 +758,21 @@ pub(crate) fn class_impl(attr: TokenStream, input: TokenStream) -> TokenStream {
         }
     };
 
+    let renaming_static_values =
+        match RenameScheme::from_named_attrs(&mut impl_.attrs, "rename_static_values") {
+            Ok(Some(r)) => r,
+            Ok(None) => RenameScheme::ScreamingSnakeCase,
+            Err((span, msg)) => {
+                return syn::Error::new(span, msg).to_compile_error().into();
+            }
+        };
+
     // Get all methods from the input.
-    let mut visitor = ClassVisitor::new(renaming, impl_.self_ty.as_ref().clone());
+    let mut visitor = ClassVisitor::new(
+        renaming_all,
+        renaming_static_values,
+        impl_.self_ty.as_ref().clone(),
+    );
     syn::visit_mut::visit_item_impl_mut(&mut visitor, &mut impl_);
 
     if let Some(err) = visitor.errors {

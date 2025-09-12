@@ -491,6 +491,7 @@ fn add_runtime(context: &mut Context) {
     boa_runtime::register(
         (
             boa_runtime::extensions::ConsoleExtension::default(),
+            boa_runtime::extensions::EventExtension,
             #[cfg(feature = "fetch")]
             boa_runtime::extensions::FetchExtension(
                 boa_runtime::fetch::BlockingReqwestFetcher::default(),

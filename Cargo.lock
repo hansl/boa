@@ -495,6 +495,7 @@ name = "boa_macros"
 version = "0.20.0"
 dependencies = [
  "cfg-if",
+ "convert_case",
  "cow-utils",
  "lz4_flex",
  "proc-macro2",
@@ -908,6 +909,15 @@ checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
 dependencies = [
  "cfg-if",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "convert_case"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
+dependencies = [
+ "unicode-segmentation",
 ]
 
 [[package]]

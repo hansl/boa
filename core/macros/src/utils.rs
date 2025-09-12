@@ -98,6 +98,7 @@ pub(crate) enum RenameScheme {
     None,
     CamelCase,
     PascalCase,
+    ScreamingSnakeCase,
 }
 
 impl FromStr for RenameScheme {
@@ -110,6 +111,10 @@ impl FromStr for RenameScheme {
             Ok(Self::CamelCase)
         } else if s.eq_ignore_ascii_case("pascalcase") {
             Ok(Self::PascalCase)
+        } else if s.eq_ignore_ascii_case("screamingsnakecase")
+            || s.eq_ignore_ascii_case("screaming_snake_case")
+        {
+            Ok(Self::ScreamingSnakeCase)
         } else {
             Err(format!(
                 r#"Invalid rename scheme: {s:?}. Accepted values are "none" or "camelCase"."#
@@ -135,92 +140,14 @@ impl RenameScheme {
         }
     }
 
-    fn camel_case(s: &str) -> String {
-        #[derive(Debug, PartialEq)]
-        enum State {
-            First,
-            Middle,
-            NextOfUpper,
-            NextOfContinuedUpper(char),
-            NextOfSepMark,
-            Other,
-        }
-
-        let mut result = String::with_capacity(s.len());
-        let mut state = State::First;
-
-        for ch in s.chars() {
-            let is_upper = ch.is_ascii_uppercase();
-            let is_lower = ch.is_ascii_lowercase();
-
-            match (&state, is_upper, is_lower) {
-                (State::First | State::Middle, true, false) => {
-                    state = State::NextOfUpper;
-                    result.push(ch.to_ascii_lowercase());
-                }
-                (State::First | State::Middle, false, true) => {
-                    state = State::Other;
-                    result.push(ch);
-                }
-                (State::First, false, false) => {}
-                (State::NextOfUpper, true, false) => {
-                    state = State::NextOfContinuedUpper(ch);
-                }
-                (State::NextOfUpper, false, true) => {
-                    state = State::Middle;
-                    result.push(ch);
-                }
-                (State::NextOfContinuedUpper(last), true, false) => {
-                    result.push(last.to_ascii_lowercase());
-                    state = State::NextOfContinuedUpper(ch);
-                }
-                (State::NextOfContinuedUpper(last), false, true) => {
-                    result.push(last.to_ascii_uppercase());
-                    state = State::Middle;
-                    result.push(ch);
-                }
-                (State::NextOfContinuedUpper(last), false, false) => {
-                    result.push(last.to_ascii_lowercase());
-                    state = State::NextOfSepMark;
-                }
-                (State::NextOfSepMark, true, false) => {
-                    state = State::NextOfUpper;
-                    result.push(ch);
-                }
-                (State::NextOfSepMark, false, true) | (State::Other, true, false) => {
-                    state = State::NextOfUpper;
-                    result.push(ch.to_ascii_uppercase());
-                }
-                (State::Other, false, true) => {
-                    result.push(ch);
-                }
-                (_, false, false) => {
-                    state = State::NextOfSepMark;
-                }
-                (_, _, _) => {}
-            }
-        }
-
-        if let State::NextOfContinuedUpper(last) = state {
-            result.push(last.to_ascii_lowercase());
-        }
-
-        result
-    }
-
-    fn pascal_case(s: &str) -> String {
-        let mut result = Self::camel_case(s);
-        if let Some(ch) = result.get_mut(..1) {
-            ch.make_ascii_uppercase();
-        }
-        result
-    }
-
     pub(crate) fn rename(self, s: String) -> String {
+        use convert_case::Casing;
+
         match self {
             Self::None => s,
-            Self::CamelCase => Self::camel_case(&s),
-            Self::PascalCase => Self::pascal_case(&s),
+            Self::CamelCase => s.to_case(convert_case::Case::Camel),
+            Self::PascalCase => s.to_case(convert_case::Case::Pascal),
+            Self::ScreamingSnakeCase => s.to_case(convert_case::Case::UpperSnake),
         }
     }
 }
@@ -243,7 +170,7 @@ mod tests {
     #[test_case("switch_to_term", "switchToTerm" ; "camel_case_10")]
     #[test_case("_a_b_c_", "aBC" ; "camel_case_11")]
     fn camel_case(input: &str, expected: &str) {
-        assert_eq!(RenameScheme::camel_case(input).as_str(), expected);
+        assert_eq!(RenameScheme::CamelCase.rename(input.to_string()).as_str(), expected);
     }
 
     #[rustfmt::skip]
@@ -255,6 +182,18 @@ mod tests {
     #[test_case("helloWORLD", "HelloWorld" ; "pascal_case_6")]
     #[test_case("HELLO_WORLD", "HelloWorld" ; "pascal_case_7")]
     fn pascal_case(input: &str, expected: &str) {
-        assert_eq!(RenameScheme::pascal_case(input).as_str(), expected);
+        assert_eq!(RenameScheme::PascalCase.rename(input.to_string()).as_str(), expected);
+    }
+
+    #[rustfmt::skip]
+    #[test_case("HelloWorld", "HELLO_WORLD" ; "screaming_snake_case_1")]
+    #[test_case("Hello_World", "HELLO_WORLD" ; "screaming_snake_case_2")]
+    #[test_case("hello_world", "HELLO_WORLD" ; "screaming_snake_case_3")]
+    #[test_case("__hello_world__", "HELLO_WORLD" ; "screaming_snake_case_4")]
+    #[test_case("HELLOWorld", "HELLO_WORLD" ; "screaming_snake_case_5")]
+    #[test_case("helloWORLD", "HELLO_WORLD" ; "screaming_snake_case_6")]
+    #[test_case("HELLO_WORLD", "HELLO_WORLD" ; "screaming_snake_case_7")]
+    fn screaming_snake_case(input: &str, expected: &str) {
+        assert_eq!(RenameScheme::ScreamingSnakeCase.rename(input.to_string()).as_str(), expected);
     }
 }

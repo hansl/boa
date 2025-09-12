@@ -13,6 +13,7 @@ proc-macro = true
 
 [dependencies]
 cfg-if.workspace = true
+convert_case = "0.8.0"
 cow-utils.workspace = true
 lz4_flex = { workspace = true, optional = true }
 quote.workspace = true

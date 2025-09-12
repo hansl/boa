@@ -116,6 +116,7 @@ pub mod event;
 pub mod fetch;
 pub mod interval;
 pub mod microtask;
+pub mod signal;
 pub mod store;
 pub mod text;
 #[cfg(feature = "url")]

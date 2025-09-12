@@ -326,7 +326,7 @@ pub struct EventListener {
     capture: bool,
     once: bool,
     passive: bool,
-    signal: Option<JsValue>
+    signal: Option<JsValue>,
 }
 
 /// The [`EventTarget`] interface is implemented by objects that can receive events and
@@ -365,7 +365,9 @@ impl EventTarget {
     /// The `addEventListener()` method of the `EventTarget` interface sets up a
     /// function that will be called whenever the specified event is delivered
     /// to the target.
-    pub fn add_event_listener(&mut self, )
+    pub fn add_event_listener(&mut self, name: JsString, handler: JsFunction) {
+        todo!()
+    }
 }
 
 /// JavaScript module containing the event classes.

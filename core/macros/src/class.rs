@@ -629,7 +629,7 @@ impl ClassVisitor {
         let constructor_body = self.constructor.as_ref().map_or_else(
             || {
                 quote! {
-                    Ok(Default::default())
+                    Err(boa_engine::JsNativeError::typ().with_message("Illegal constructor").into())
                 }
             },
             |c| c.body.clone(),

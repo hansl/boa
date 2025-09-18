@@ -227,17 +227,6 @@ mod bits {
         value & MASK_KIND == MASK_STRING
     }
 
-    /// Returns a tagged u64 of a 64-bits float.
-    #[inline(always)]
-    pub(super) const fn tag_f64(value: f64) -> u64 {
-        if value.is_nan() {
-            // Reduce any NAN to a canonical NAN representation.
-            f64::NAN.to_bits()
-        } else {
-            value.to_bits()
-        }
-    }
-
     /// Returns a tagged u64 of a 32-bits integer.
     #[inline(always)]
     pub(super) const fn tag_i32(value: i32) -> u64 {
@@ -300,10 +289,16 @@ const_assert!(f64::from_bits(bits::MASK_SYMBOL).is_nan());
 const_assert!(f64::from_bits(bits::MASK_BIGINT).is_nan());
 
 /// A NaN-boxed [`JsValue`]'s inner.
-pub(crate) struct NanBoxedValue {
+pub(crate) union NanBoxedValue {
     #[cfg(target_pointer_width = "32")]
-    half: u32,
+    /// The value as a pointer (with padding).
+    ptr: (u32, *mut ()),
+
+    #[cfg(target_pointer_width = "64")]
     ptr: *mut (),
+
+    /// The value as a 64-bits float.
+    value: f64,
 }
 
 impl fmt::Debug for NanBoxedValue {
@@ -351,11 +346,7 @@ impl Clone for NanBoxedValue {
         } else if let Some(s) = self.as_symbol() {
             Self::symbol(s.clone())
         } else {
-            Self {
-                #[cfg(target_pointer_width = "32")]
-                half: self.half,
-                ptr: self.ptr,
-            }
+            unsafe { Self { ptr: self.ptr } }
         }
     }
 }
@@ -389,37 +380,42 @@ impl NanBoxedValue {
     #[must_use]
     #[inline(always)]
     fn value(&self) -> u64 {
-        let value = self.ptr.addr() as u64;
-
+        #[cfg(target_pointer_width = "64")]
+        let value = unsafe { self.ptr.addr() as u64 };
         #[cfg(target_pointer_width = "32")]
-        let value = ((self.half as u64) << 32) | value;
+        let value = unsafe { self.ptr.0.addr() as u64 };
 
         value
     }
 
-    /// Returns a `InnerValue` from a Null.
+    /// Returns an `InnerValue` from a Null.
     #[must_use]
     #[inline(always)]
     pub(crate) const fn null() -> Self {
         Self::from_inner_unchecked(bits::VALUE_NULL)
     }
 
-    /// Returns a `InnerValue` from an undefined.
+    /// Returns an `InnerValue` from an undefined.
     #[must_use]
     #[inline(always)]
     pub(crate) const fn undefined() -> Self {
         Self::from_inner_unchecked(bits::VALUE_UNDEFINED)
     }
 
-    /// Returns a `InnerValue` from a 64-bits float. If the float is `NaN`,
+    /// Returns an `InnerValue` from a 64-bits float. If the float is `NaN`,
     /// it will be reduced to a canonical `NaN` representation.
     #[must_use]
     #[inline(always)]
     pub(crate) const fn float64(value: f64) -> Self {
-        Self::from_inner_unchecked(bits::tag_f64(value))
+        // Normalize NaNs.
+        if value.is_nan() {
+            Self { value: f64::NAN }
+        } else {
+            Self { value }
+        }
     }
 
-    /// Returns a `InnerValue` from a 32-bits integer.
+    /// Returns an `InnerValue` from a 32-bits integer.
     #[must_use]
     #[inline(always)]
     pub(crate) const fn integer32(value: i32) -> Self {
@@ -537,7 +533,7 @@ impl NanBoxedValue {
     #[inline(always)]
     pub(crate) fn as_float64(&self) -> Option<f64> {
         if self.is_float64() {
-            Some(f64::from_bits(self.value()))
+            Some(unsafe { self.value })
         } else {
             None
         }

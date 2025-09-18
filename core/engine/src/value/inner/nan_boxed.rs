@@ -183,24 +183,12 @@ mod bits {
     /// The constant true value.
     pub(super) const VALUE_TRUE: u64 = MASK_BOOLEAN | 1;
 
-    /// Checks that a value is a valid boolean (either true or false).
-    #[inline(always)]
-    pub(super) const fn is_bool(value: u64) -> bool {
-        value & MASK_KIND == MASK_BOOLEAN
-    }
-
     /// Checks that a value is a valid float, not a tagged nan boxed value.
     #[inline(always)]
     pub(super) const fn is_float(value: u64) -> bool {
         (value & MASK_NAN != MASK_NAN)
             || (value & MASK_KIND) == (MASK_NAN | TAG_INF)
             || (value & MASK_KIND) == (MASK_NAN | TAG_NAN)
-    }
-
-    /// Checks that a value is a valid integer32.
-    #[inline(always)]
-    pub(super) const fn is_integer32(value: u64) -> bool {
-        value & MASK_KIND == MASK_INT32
     }
 
     /// Checks that a value is a valid `BigInt`.
@@ -237,12 +225,6 @@ mod bits {
     #[inline(always)]
     pub(super) const fn untag_i32(value: u64) -> i32 {
         value as i32
-    }
-
-    /// Returns a tagged u64 of a boolean.
-    #[inline(always)]
-    pub(super) const fn tag_bool(value: bool) -> u64 {
-        value as u64 | MASK_BOOLEAN
     }
 
     /// Returns a boolan from a tagged value.
@@ -288,6 +270,31 @@ const_assert!(f64::from_bits(bits::MASK_STRING).is_nan());
 const_assert!(f64::from_bits(bits::MASK_SYMBOL).is_nan());
 const_assert!(f64::from_bits(bits::MASK_BIGINT).is_nan());
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[non_exhaustive]
+#[repr(u16)]
+enum Header {
+    Integer32 = 0x7FF9,
+    Boolean = 0x7FFA,
+    NullOrUndefined = 0x7FFB,
+}
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C, align(8))]
+struct Inner {
+    #[cfg(target_endian = "big")]
+    header: Header,
+    #[cfg(target_endian = "big")]
+    spacer: u16,
+
+    data: i32,
+
+    #[cfg(target_endian = "little")]
+    spacer: u16,
+    #[cfg(target_endian = "little")]
+    header: Header,
+}
+
 /// A NaN-boxed [`JsValue`]'s inner.
 pub(crate) union NanBoxedValue {
     #[cfg(target_pointer_width = "32")]
@@ -299,6 +306,10 @@ pub(crate) union NanBoxedValue {
 
     /// The value as a 64-bits float.
     value: f64,
+
+    inner: Inner,
+
+    bits: u64,
 }
 
 impl fmt::Debug for NanBoxedValue {
@@ -380,12 +391,7 @@ impl NanBoxedValue {
     #[must_use]
     #[inline(always)]
     fn value(&self) -> u64 {
-        #[cfg(target_pointer_width = "64")]
-        let value = unsafe { self.ptr.addr() as u64 };
-        #[cfg(target_pointer_width = "32")]
-        let value = unsafe { self.ptr.0.addr() as u64 };
-
-        value
+        unsafe { self.bits }
     }
 
     /// Returns an `InnerValue` from a Null.
@@ -426,7 +432,13 @@ impl NanBoxedValue {
     #[must_use]
     #[inline(always)]
     pub(crate) const fn boolean(value: bool) -> Self {
-        Self::from_inner_unchecked(bits::tag_bool(value))
+        Self {
+            inner: Inner {
+                header: Header::Boolean,
+                spacer: 0,
+                data: value as i32,
+            },
+        }
     }
 
     /// Returns a `InnerValue` from a boxed [`JsBigInt`].
@@ -483,7 +495,7 @@ impl NanBoxedValue {
     #[must_use]
     #[inline(always)]
     pub(crate) fn is_bool(&self) -> bool {
-        bits::is_bool(self.value())
+        unsafe { self.inner.header == Header::Boolean }
     }
 
     /// Returns true if a value is a 64-bits float.
@@ -497,7 +509,7 @@ impl NanBoxedValue {
     #[must_use]
     #[inline(always)]
     pub(crate) fn is_integer32(&self) -> bool {
-        bits::is_integer32(self.value())
+        unsafe { self.inner.header == Header::Integer32 }
     }
 
     /// Returns true if a value is a [`JsBigInt`]. A `NaN` will not match here.
@@ -544,7 +556,7 @@ impl NanBoxedValue {
     #[inline(always)]
     pub(crate) fn as_integer32(&self) -> Option<i32> {
         if self.is_integer32() {
-            Some(bits::untag_i32(self.value()))
+            Some(unsafe { self.inner.data })
         } else {
             None
         }

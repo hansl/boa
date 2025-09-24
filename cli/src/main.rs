@@ -10,6 +10,7 @@
 mod debug;
 mod helper;
 mod logger;
+mod prompt;
 
 use crate::logger::SharedExternalPrinterLogger;
 use boa_engine::context::time::JsInstant;
@@ -27,30 +28,23 @@ use boa_engine::{
 use boa_parser::source::ReadChar;
 use clap::{Parser, ValueEnum, ValueHint};
 use color_eyre::{
-    Result, Section,
+    Result,
     eyre::{WrapErr, eyre},
 };
 use colored::Colorize;
 use debug::init_boa_debug_object;
 use futures_concurrency::future::FutureGroup;
 use futures_lite::{StreamExt, future};
-use rustyline::{EditMode, Editor, config::Config, error::ReadlineError};
 use std::collections::BTreeMap;
 use std::mem;
-use std::sync::mpsc::{Sender, TryRecvError};
-use std::time::Duration;
 use std::{
     cell::RefCell,
     collections::VecDeque,
     eprintln,
-    fs::OpenOptions,
-    io,
     path::{Path, PathBuf},
     println,
     rc::Rc,
-    thread,
 };
-
 // ----
 
 #[cfg(all(
@@ -86,13 +80,10 @@ static ALLOC: mimalloc_safe::MiMalloc = mimalloc_safe::MiMalloc;
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-/// CLI configuration for Boa.
-static CLI_HISTORY: &str = ".boa_history";
-
 // Added #[allow(clippy::option_option)] because to StructOpt an Option<Option<T>>
 // is an optional argument that optionally takes a value ([--opt=[val]]).
 // https://docs.rs/structopt/0.3.11/structopt/#type-magic
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 #[command(author, version, about, name = "boa")]
 #[allow(clippy::struct_excessive_bools)] // NOTE: Allow having more than 3 bools in struct
 struct Opt {
@@ -413,7 +404,6 @@ fn main() -> Result<()> {
     let args = Opt::parse();
 
     // A channel of expressions to run.
-    let (sender, receiver) = std::sync::mpsc::channel::<String>();
     let printer = SharedExternalPrinterLogger::new();
 
     let executor = Rc::new(Executor::new(printer.clone()));
@@ -456,102 +446,9 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let handle = start_readline_thread(sender, printer.clone(), args.vi_mode);
-
-    loop {
-        match receiver.try_recv() {
-            Ok(line) => {
-                evaluate_expr(&line, &args, &mut context, &printer)?;
-            }
-            Err(TryRecvError::Empty) => {}
-            Err(TryRecvError::Disconnected) => break,
-        }
-
-        if let Err(err) = context.run_jobs() {
-            printer.print(uncaught_job_error(&err));
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-
-    handle.join().expect("failed to join thread");
+    prompt::run(&printer, &args, &mut context)?;
 
     Ok(())
-}
-
-fn readline_thread_main(
-    sender: &Sender<String>,
-    printer_out: &SharedExternalPrinterLogger,
-    vi_mode: bool,
-) -> Result<()> {
-    let config = Config::builder()
-        .keyseq_timeout(Some(1))
-        .edit_mode(if vi_mode {
-            EditMode::Vi
-        } else {
-            EditMode::Emacs
-        })
-        .build();
-
-    let mut editor =
-        Editor::with_config(config).wrap_err("failed to set the editor configuration")?;
-    if let Ok(printer) = editor.create_external_printer() {
-        printer_out.set(printer);
-    }
-
-    // Check if the history file exists. If it doesn't, create it.
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(CLI_HISTORY)?;
-    editor
-        .load_history(CLI_HISTORY)
-        .wrap_err("failed to read history file `.boa_history`")?;
-    let readline = ">> ";
-    editor.set_helper(Some(helper::RLHelper::new(readline)));
-
-    loop {
-        match editor.readline(readline) {
-            Ok(line) if line == ".exit" => break,
-            Err(ReadlineError::Interrupted | ReadlineError::Eof) => break,
-
-            Ok(line) => {
-                let line = line.trim_end();
-                editor.add_history_entry(line).map_err(io::Error::other)?;
-                sender.send(line.to_string())?;
-                thread::sleep(Duration::from_millis(10));
-            }
-
-            Err(err) => {
-                let final_error = eyre!("could not read the next line of the input");
-                let final_error = if let Err(e) = editor.save_history(CLI_HISTORY) {
-                    final_error.error(e)
-                } else {
-                    final_error
-                };
-                return Err(final_error.error(err));
-            }
-        }
-    }
-
-    editor.save_history(CLI_HISTORY)?;
-
-    Ok(())
-}
-
-/// Create the readline thread which sends lines from stdin back to the main thread.
-fn start_readline_thread(
-    sender: Sender<String>,
-    printer_out: SharedExternalPrinterLogger,
-    vi_mode: bool,
-) -> thread::JoinHandle<()> {
-    thread::spawn(
-        move || match readline_thread_main(&sender, &printer_out, vi_mode) {
-            Ok(()) => {}
-            Err(e) => eprintln!("readline thread failed: {e}"),
-        },
-    )
 }
 
 /// Adds the CLI runtime to the context with default options.

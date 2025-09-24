@@ -1,8 +1,10 @@
 use colored::{Color, Colorize};
 use phf::{Set, phf_set};
 use regex::{Captures, Regex, Replacer};
+use rustyline::hint::Hinter;
+use rustyline::history::SearchDirection;
 use rustyline::{
-    Completer, Helper, Hinter,
+    Completer, Context, Helper,
     error::ReadlineError,
     highlight::{CmdKind, Highlighter},
     validate::{MatchingBracketValidator, ValidationContext, ValidationResult, Validator},
@@ -36,7 +38,7 @@ const IDENTIFIER_COLOR: Color = Color::TrueColor {
 const READLINE_COLOR: Color = Color::Cyan;
 
 #[allow(clippy::upper_case_acronyms, clippy::redundant_pub_crate)]
-#[derive(Completer, Helper, Hinter)]
+#[derive(Completer, Helper)]
 pub(crate) struct RLHelper {
     highlighter: LineHighlighter,
     validator: MatchingBracketValidator,
@@ -63,6 +65,36 @@ impl Validator for RLHelper {
 
     fn validate_while_typing(&self) -> bool {
         self.validator.validate_while_typing()
+    }
+}
+
+impl Hinter for RLHelper {
+    type Hint = String;
+
+    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<Self::Hint> {
+        if line.is_empty() || pos < line.len() {
+            return None;
+        }
+
+        // Check if we have used this line in history.
+        let start = if ctx.history_index() == ctx.history().len() {
+            ctx.history_index().saturating_sub(1)
+        } else {
+            ctx.history_index()
+        };
+
+        if let Some(sr) = ctx
+            .history()
+            .starts_with(line, start, SearchDirection::Reverse)
+            .unwrap_or(None)
+        {
+            if sr.entry == line {
+                return None;
+            }
+            return Some(sr.entry[pos..].to_owned());
+        }
+
+        None
     }
 }
 
@@ -94,7 +126,8 @@ impl Highlighter for RLHelper {
         candidate: &'c str,
         _completion: rustyline::CompletionType,
     ) -> Cow<'c, str> {
-        self.highlighter.highlight(candidate, 0)
+        candidate.into()
+        // self.highlighter.highlight(candidate, 0)
     }
 
     fn highlight_char(&self, line: &str, _: usize, _: CmdKind) -> bool {

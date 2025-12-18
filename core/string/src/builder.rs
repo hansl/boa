@@ -1,5 +1,5 @@
-use crate::vtable::sequence::{LATIN1_DATA_OFFSET, UTF16_DATA_OFFSET};
-use crate::{JsStr, JsStrVariant, JsString, Latin1SequenceString, Utf16SequenceString, alloc_overflow};
+use crate::r#type::{Latin1, StringType, Utf16};
+use crate::{JsStr, JsStrVariant, JsString, alloc_overflow};
 use std::{
     alloc::{Layout, alloc, dealloc, realloc},
     marker::PhantomData,
@@ -8,72 +8,25 @@ use std::{
     str::{self},
 };
 
-/// Trait that maps the data type to the appropriate sequence string type.
-pub(crate) trait SequenceStringType: Copy {
-    /// The offset to the data field in the sequence string struct.
-    const DATA_OFFSET: usize;
-
-    /// Create the base layout for the sequence string header.
-    fn base_layout() -> Layout;
-
-    /// Write the sequence string header to the given pointer.
-    ///
-    /// # Safety
-    /// The pointer must be valid and properly aligned for writing.
-    unsafe fn write_header(ptr: *mut u8, len: usize);
-}
-
-impl SequenceStringType for u8 {
-    const DATA_OFFSET: usize = LATIN1_DATA_OFFSET;
-
-    fn base_layout() -> Layout {
-        Layout::new::<Latin1SequenceString>()
-    }
-
-    unsafe fn write_header(ptr: *mut u8, len: usize) {
-        // SAFETY: Caller must ensure ptr is valid.
-        unsafe {
-            ptr.cast::<Latin1SequenceString>()
-                .write(Latin1SequenceString::new(len));
-        }
-    }
-}
-
-impl SequenceStringType for u16 {
-    const DATA_OFFSET: usize = UTF16_DATA_OFFSET;
-
-    fn base_layout() -> Layout {
-        Layout::new::<Utf16SequenceString>()
-    }
-
-    unsafe fn write_header(ptr: *mut u8, len: usize) {
-        // SAFETY: Caller must ensure ptr is valid.
-        unsafe {
-            ptr.cast::<Utf16SequenceString>()
-                .write(Utf16SequenceString::new(len));
-        }
-    }
-}
-
-/// A mutable builder to create instance of `JsString`.
+/// A mutable builder to create instances of `JsString`.
 #[derive(Debug)]
 #[allow(private_bounds)]
-pub struct JsStringBuilder<D: SequenceStringType> {
+pub struct JsStringBuilder<D: StringType> {
     cap: usize,
     len: usize,
     inner: NonNull<u8>,
     phantom_data: PhantomData<D>,
 }
 
-impl<D: SequenceStringType> Default for JsStringBuilder<D> {
+impl<D: StringType> Default for JsStringBuilder<D> {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[allow(private_bounds)]
-impl<D: SequenceStringType> JsStringBuilder<D> {
-    const DATA_SIZE: usize = size_of::<D>();
+impl<D: StringType> JsStringBuilder<D> {
+    const DATA_SIZE: usize = size_of::<D::Char>();
     const MIN_NON_ZERO_CAP: usize = 8 / Self::DATA_SIZE;
 
     /// Create a new `JsStringBuilder` with capacity of zero.
@@ -182,7 +135,7 @@ impl<D: SequenceStringType> JsStringBuilder<D> {
     ///
     /// Caller should ensure that the inner is allocated.
     #[must_use]
-    const unsafe fn data(&self) -> *mut D {
+    const unsafe fn data(&self) -> *mut D::Char {
         let seq_ptr = self.inner.as_ptr();
         // SAFETY: Caller should ensure that the inner is allocated.
         unsafe { seq_ptr.add(D::DATA_OFFSET).cast() }
@@ -227,7 +180,7 @@ impl<D: SequenceStringType> JsStringBuilder<D> {
 
     /// Appends an element to the inner `RawJsString` of `JsStringBuilder`.
     #[inline]
-    pub fn push(&mut self, v: D) {
+    pub fn push(&mut self, v: D::Char) {
         let required_cap = self.len() + 1;
         self.allocate_if_needed(required_cap);
         // SAFETY:
@@ -247,7 +200,7 @@ impl<D: SequenceStringType> JsStringBuilder<D> {
     ///
     /// Caller should ensure the capacity is large enough to hold elements.
     #[inline]
-    pub const unsafe fn extend_from_slice_unchecked(&mut self, v: &[D]) {
+    pub const unsafe fn extend_from_slice_unchecked(&mut self, v: &[D::Char]) {
         // SAFETY: Caller should ensure the capacity is large enough to hold elements.
         unsafe {
             ptr::copy_nonoverlapping(v.as_ptr(), self.data().add(self.len()), v.len());
@@ -257,7 +210,7 @@ impl<D: SequenceStringType> JsStringBuilder<D> {
 
     /// Pushes elements from slice to `JsStringBuilder`.
     #[inline]
-    pub fn extend_from_slice(&mut self, v: &[D]) {
+    pub fn extend_from_slice(&mut self, v: &[D::Char]) {
         let required_cap = self.len() + v.len();
         self.allocate_if_needed(required_cap);
         // SAFETY:
@@ -336,7 +289,7 @@ impl<D: SequenceStringType> JsStringBuilder<D> {
     ///
     /// Caller should ensure the capacity is large enough to hold elements.
     #[inline]
-    pub const unsafe fn push_unchecked(&mut self, v: D) {
+    pub const unsafe fn push_unchecked(&mut self, v: D::Char) {
         // SAFETY: Caller should ensure the capacity is large enough to hold elements.
         unsafe {
             self.data().add(self.len()).write(v);
@@ -367,7 +320,7 @@ impl<D: SequenceStringType> JsStringBuilder<D> {
     /// Extracts a slice containing the elements in the inner `RawJsString`.
     #[inline]
     #[must_use]
-    pub fn as_slice(&self) -> &[D] {
+    pub fn as_slice(&self) -> &[D::Char] {
         if self.is_allocated() {
             // SAFETY:
             // The inner `RawJsString` is allocated which means it is not null.
@@ -384,7 +337,7 @@ impl<D: SequenceStringType> JsStringBuilder<D> {
     /// Use of a builder whose contents are not valid encoding is undefined behavior.
     #[inline]
     #[must_use]
-    pub unsafe fn as_mut_slice(&mut self) -> &mut [D] {
+    pub unsafe fn as_mut_slice(&mut self) -> &mut [D::Char] {
         if self.is_allocated() {
             // SAFETY:
             // The inner `RawJsString` is allocated which means it is not null.
@@ -415,7 +368,7 @@ impl<D: SequenceStringType> JsStringBuilder<D> {
         // `NonNull` verified for us that the pointer returned by `alloc` is valid,
         // meaning we can write to its pointed memory.
         unsafe {
-            D::write_header(inner.as_ptr(), len);
+            D::write_header(inner.as_ptr().cast(), len);
         }
 
         // Tell the compiler not to call the destructor of `JsStringBuilder`,
@@ -426,7 +379,7 @@ impl<D: SequenceStringType> JsStringBuilder<D> {
     }
 }
 
-impl<D: SequenceStringType> Drop for JsStringBuilder<D> {
+impl<D: StringType> Drop for JsStringBuilder<D> {
     /// Set cold since [`JsStringBuilder`] should be created to build `JsString`
     #[cold]
     #[inline]
@@ -446,21 +399,21 @@ impl<D: SequenceStringType> Drop for JsStringBuilder<D> {
     }
 }
 
-impl<D: SequenceStringType> AddAssign<&JsStringBuilder<D>> for JsStringBuilder<D> {
+impl<D: StringType> AddAssign<&JsStringBuilder<D>> for JsStringBuilder<D> {
     #[inline]
     fn add_assign(&mut self, rhs: &JsStringBuilder<D>) {
         self.extend_from_slice(rhs.as_slice());
     }
 }
 
-impl<D: SequenceStringType> AddAssign<&[D]> for JsStringBuilder<D> {
+impl<D: StringType> AddAssign<&[D::Char]> for JsStringBuilder<D> {
     #[inline]
-    fn add_assign(&mut self, rhs: &[D]) {
+    fn add_assign(&mut self, rhs: &[D::Char]) {
         self.extend_from_slice(rhs);
     }
 }
 
-impl<D: SequenceStringType> Add<&JsStringBuilder<D>> for JsStringBuilder<D> {
+impl<D: StringType> Add<&JsStringBuilder<D>> for JsStringBuilder<D> {
     type Output = Self;
 
     #[inline]
@@ -470,19 +423,19 @@ impl<D: SequenceStringType> Add<&JsStringBuilder<D>> for JsStringBuilder<D> {
     }
 }
 
-impl<D: SequenceStringType> Add<&[D]> for JsStringBuilder<D> {
+impl<D: StringType> Add<&[D::Char]> for JsStringBuilder<D> {
     type Output = Self;
 
     #[inline]
-    fn add(mut self, rhs: &[D]) -> Self::Output {
+    fn add(mut self, rhs: &[D::Char]) -> Self::Output {
         self.extend_from_slice(rhs);
         self
     }
 }
 
-impl<D: SequenceStringType> Extend<D> for JsStringBuilder<D> {
+impl<D: StringType> Extend<D::Char> for JsStringBuilder<D> {
     #[inline]
-    fn extend<I: IntoIterator<Item = D>>(&mut self, iter: I) {
+    fn extend<I: IntoIterator<Item = D::Char>>(&mut self, iter: I) {
         let iterator = iter.into_iter();
         let (lower_bound, _) = iterator.size_hint();
         let require_cap = self.len() + lower_bound;
@@ -491,18 +444,18 @@ impl<D: SequenceStringType> Extend<D> for JsStringBuilder<D> {
     }
 }
 
-impl<D: SequenceStringType> FromIterator<D> for JsStringBuilder<D> {
+impl<D: StringType> FromIterator<D::Char> for JsStringBuilder<D> {
     #[inline]
-    fn from_iter<T: IntoIterator<Item = D>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = D::Char>>(iter: T) -> Self {
         let mut builder = Self::new();
         builder.extend(iter);
         builder
     }
 }
 
-impl<D: SequenceStringType> From<&[D]> for JsStringBuilder<D> {
+impl<D: StringType> From<&[D::Char]> for JsStringBuilder<D> {
     #[inline]
-    fn from(value: &[D]) -> Self {
+    fn from(value: &[D::Char]) -> Self {
         let mut builder = Self::with_capacity(value.len());
         // SAFETY: The capacity is large enough to hold elements.
         unsafe { builder.extend_from_slice_unchecked(value) };
@@ -510,14 +463,19 @@ impl<D: SequenceStringType> From<&[D]> for JsStringBuilder<D> {
     }
 }
 
-impl<D: SequenceStringType + Eq + PartialEq> PartialEq for JsStringBuilder<D> {
+impl<D: StringType> PartialEq for JsStringBuilder<D>
+where
+    D::Char: Eq + PartialEq,
+{
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.as_slice().eq(other.as_slice())
+        let slice: &[D::Char] = self.as_slice();
+        let other_slice: &[D::Char] = other.as_slice();
+        slice.eq(other_slice)
     }
 }
 
-impl<D: SequenceStringType> Clone for JsStringBuilder<D> {
+impl<D: StringType> Clone for JsStringBuilder<D> {
     #[inline]
     fn clone(&self) -> Self {
         if self.is_allocated() {
@@ -577,7 +535,7 @@ impl<D: SequenceStringType> Clone for JsStringBuilder<D> {
 /// s.extend([b'1', b'2', b'3']);
 /// let js_string = s.build();
 /// ```
-pub type Latin1JsStringBuilder = JsStringBuilder<u8>;
+pub type Latin1JsStringBuilder = JsStringBuilder<Latin1>;
 
 impl Latin1JsStringBuilder {
     /// Builds a `JsString` if the current instance is strictly `ASCII`.
@@ -626,7 +584,7 @@ impl Latin1JsStringBuilder {
 /// s.extend([0xD83C, 0xDFB9, 0xD83C, 0xDFB6, 0xD83C, 0xDFB5]); // 🎹🎶🎵
 /// let js_string = s.build();
 /// ```
-pub type Utf16JsStringBuilder = JsStringBuilder<u16>;
+pub type Utf16JsStringBuilder = JsStringBuilder<Utf16>;
 
 impl Utf16JsStringBuilder {
     /// Builds `JsString` from `Utf16JsStringBuilder`

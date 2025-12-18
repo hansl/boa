@@ -43,6 +43,9 @@ pub(crate) const fn trim_latin1_end(mut bytes: &[u8]) -> &[u8] {
 /// Inner representation of a [`JsStr`].
 #[derive(Debug, Clone, Copy)]
 pub enum JsStrVariant<'a> {
+    /// ASCII string representation.
+    Ascii(&'a str),
+
     /// Latin1 string representation.
     Latin1(&'a [u8]),
 
@@ -66,7 +69,31 @@ unsafe impl Send for JsStr<'_> {}
 
 impl<'a> JsStr<'a> {
     /// This represents an empty string.
-    pub const EMPTY: Self = Self::latin1("".as_bytes());
+    pub const EMPTY: Self = Self::ascii("");
+
+    /// Creates a [`JsStr`] from an ASCII string without checking that the
+    /// string is valid ASCII.
+    ///
+    /// SAFETY: The caller must assert that the string is ASCII (every bytes must
+    /// be between `0..=127`.
+    #[inline]
+    #[must_use]
+    const unsafe fn ascii_unchecked(value: &'a str) -> Self {
+        Self {
+            inner: JsStrVariant::Ascii(value),
+        }
+    }
+
+    /// Creates a [`JsStr`] from codepoints that can fit in `0..=127`.
+    ///
+    /// Panics if a value isn't in this range.
+    #[inline]
+    #[must_use]
+    pub const fn ascii(value: &'a str) -> Self {
+        assert!(value.is_ascii());
+        // SAFETY: We just checked.
+        unsafe { Self::ascii_unchecked(value) }
+    }
 
     /// Creates a [`JsStr`] from codepoints that can fit in a `u8`.
     #[inline]
@@ -90,7 +117,8 @@ impl<'a> JsStr<'a> {
     #[inline]
     #[must_use]
     pub const fn len(&self) -> usize {
-        match &self.inner {
+        match self.inner {
+            JsStrVariant::Ascii(s) => s.len(),
             JsStrVariant::Latin1(value) => value.len(),
             JsStrVariant::Utf16(value) => value.len(),
         }
@@ -108,6 +136,8 @@ impl<'a> JsStr<'a> {
     #[must_use]
     pub(crate) const fn as_ptr(&self) -> NonNull<u8> {
         match self.inner {
+            // SAFETY: value is always pointing to valid memory.
+            JsStrVariant::Ascii(value) => NonNull::from_ref(value).cast(),
             JsStrVariant::Latin1(value) => NonNull::from_ref(&value[0]),
             JsStrVariant::Utf16(value) => NonNull::from_ref(&value[0]).cast(),
         }
@@ -126,7 +156,7 @@ impl<'a> JsStr<'a> {
     pub const fn as_latin1(&self) -> Option<&[u8]> {
         match self.inner {
             JsStrVariant::Latin1(value) => Some(value),
-            JsStrVariant::Utf16(_) => None,
+            _ => None,
         }
     }
 
@@ -162,7 +192,7 @@ impl<'a> JsStr<'a> {
     #[inline]
     #[must_use]
     pub fn trim_start(self) -> Self {
-        match self.variant() {
+        match self.inner {
             JsStrVariant::Latin1(s) => Self::latin1(trim_latin1_start(s)),
             JsStrVariant::Utf16(s) => {
                 let value = if let Some(left) = s.iter().copied().position(|r| {
@@ -175,6 +205,8 @@ impl<'a> JsStr<'a> {
 
                 Self::utf16(value)
             }
+            // SAFETY: ASCII variant already validated as ASCII.
+            JsStrVariant::Ascii(s) => unsafe { Self::ascii_unchecked(s.trim_start()) },
         }
     }
 
@@ -182,7 +214,7 @@ impl<'a> JsStr<'a> {
     #[inline]
     #[must_use]
     pub fn trim_end(self) -> Self {
-        match self.variant() {
+        match self.inner {
             JsStrVariant::Latin1(s) => Self::latin1(trim_latin1_end(s)),
             JsStrVariant::Utf16(s) => {
                 let value = if let Some(right) = s.iter().copied().rposition(|r| {
@@ -195,6 +227,8 @@ impl<'a> JsStr<'a> {
 
                 Self::utf16(value)
             }
+            // SAFETY: ASCII variant already validated as ASCII.
+            JsStrVariant::Ascii(s) => unsafe { Self::ascii_unchecked(s.trim_end()) },
         }
     }
 
@@ -242,6 +276,7 @@ impl<'a> JsStr<'a> {
     #[must_use]
     pub fn to_vec(&self) -> Vec<u16> {
         match self.variant() {
+            JsStrVariant::Ascii(s) => s.encode_utf16().collect(),
             JsStrVariant::Latin1(v) => v.iter().copied().map(u16::from).collect(),
             JsStrVariant::Utf16(v) => v.to_vec(),
         }
@@ -331,7 +366,10 @@ impl<'a> JsStr<'a> {
         // position >= 0 ensured by position: usize
         assert!(position < size);
 
-        match self.variant() {
+        match self.inner {
+            JsStrVariant::Ascii(s) => {
+                CodePoint::Unicode(s.chars().nth(position).expect("Already checked the size"))
+            }
             JsStrVariant::Latin1(v) => {
                 let code_point = v.get(position).expect("Already checked the size");
                 CodePoint::Unicode(*code_point as char)
@@ -438,6 +476,7 @@ impl<'a> JsStr<'a> {
     #[must_use]
     pub fn contains(&self, element: u8) -> bool {
         match self.variant() {
+            JsStrVariant::Ascii(s) => s.as_bytes().contains(&element),
             JsStrVariant::Latin1(v) => v.contains(&element),
             JsStrVariant::Utf16(v) => v.contains(&u16::from(element)),
         }
@@ -494,6 +533,7 @@ impl<'a> JsStr<'a> {
     #[inline]
     pub fn to_std_string(&self) -> Result<String, std::string::FromUtf16Error> {
         match self.variant() {
+            JsStrVariant::Ascii(v) => Ok(v.to_string()),
             JsStrVariant::Latin1(v) => Ok(v.iter().copied().map(char::from).collect()),
             JsStrVariant::Utf16(v) => String::from_utf16(v),
         }
@@ -543,6 +583,12 @@ impl Hash for JsStr<'_> {
         // NOTE: The hash function has been inlined to ensure that a hash of latin1 and U16
         // encoded strings remains the same if they have the same characters
         match self.variant() {
+            JsStrVariant::Ascii(v) => {
+                state.write_usize(v.len());
+                for elem in v.chars() {
+                    state.write_u16(elem as u16);
+                }
+            }
             JsStrVariant::Latin1(s) => {
                 state.write_usize(s.len());
                 for elem in s {
@@ -563,6 +609,7 @@ impl Ord for JsStr<'_> {
     #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self.variant(), other.variant()) {
+            (JsStrVariant::Ascii(x), JsStrVariant::Ascii(y)) => x.cmp(y),
             (JsStrVariant::Latin1(x), JsStrVariant::Latin1(y)) => x.cmp(y),
             (JsStrVariant::Utf16(x), JsStrVariant::Utf16(y)) => x.cmp(y),
             _ => self.iter().cmp(other.iter()),
@@ -596,6 +643,7 @@ impl PartialEq<str> for JsStr<'_> {
     #[inline]
     fn eq(&self, other: &str) -> bool {
         match self.variant() {
+            JsStrVariant::Ascii(s) => s.as_bytes() == other.as_bytes(),
             JsStrVariant::Latin1(v) => v == other.as_bytes(),
             JsStrVariant::Utf16(v) => other.encode_utf16().zip(v).all(|(a, b)| a == *b),
         }
@@ -645,6 +693,7 @@ impl<'a> JsSliceIndex<'a> for usize {
     #[inline]
     fn get(value: JsStr<'a>, index: Self) -> Option<Self::Value> {
         match value.variant() {
+            JsStrVariant::Ascii(s) => s.as_bytes().get(index).copied().map(u16::from),
             JsStrVariant::Latin1(v) => v.get(index).copied().map(u16::from),
             JsStrVariant::Utf16(v) => v.get(index).copied(),
         }
@@ -658,6 +707,7 @@ impl<'a> JsSliceIndex<'a> for usize {
         // Safety: Caller must ensure the index is not out of bounds
         unsafe {
             match value.variant() {
+                JsStrVariant::Ascii(v) => u16::from(*v.as_bytes().get_unchecked(index)),
                 JsStrVariant::Latin1(v) => u16::from(*v.get_unchecked(index)),
                 JsStrVariant::Utf16(v) => *v.get_unchecked(index),
             }
@@ -671,6 +721,8 @@ impl<'a> JsSliceIndex<'a> for std::ops::Range<usize> {
     #[inline]
     fn get(value: JsStr<'a>, index: Self) -> Option<Self::Value> {
         match value.variant() {
+            // SAFETY: `s` is always valid ASCII after construction.
+            JsStrVariant::Ascii(s) => s.get(index).map(|s| unsafe { JsStr::ascii_unchecked(s) }),
             JsStrVariant::Latin1(v) => v.get(index).map(JsStr::latin1),
             JsStrVariant::Utf16(v) => v.get(index).map(JsStr::utf16),
         }
@@ -684,6 +736,8 @@ impl<'a> JsSliceIndex<'a> for std::ops::Range<usize> {
         // Safety: Caller must ensure the index is not out of bounds
         unsafe {
             match value.variant() {
+                // SAFETY: `s` is always valid ASCII after construction.
+                JsStrVariant::Ascii(s) => unsafe { JsStr::ascii_unchecked(s.get_unchecked(index)) },
                 JsStrVariant::Latin1(v) => JsStr::latin1(v.get_unchecked(index)),
                 JsStrVariant::Utf16(v) => JsStr::utf16(v.get_unchecked(index)),
             }
@@ -697,6 +751,7 @@ impl<'a> JsSliceIndex<'a> for std::ops::RangeInclusive<usize> {
     #[inline]
     fn get(value: JsStr<'a>, index: Self) -> Option<Self::Value> {
         match value.variant() {
+            JsStrVariant::Ascii(s) => s.get(index).map(JsStr::ascii),
             JsStrVariant::Latin1(v) => v.get(index).map(JsStr::latin1),
             JsStrVariant::Utf16(v) => v.get(index).map(JsStr::utf16),
         }
@@ -710,6 +765,8 @@ impl<'a> JsSliceIndex<'a> for std::ops::RangeInclusive<usize> {
         // Safety: Caller must ensure the index is not out of bounds
         unsafe {
             match value.variant() {
+                // SAFETY: `s` is always valid ASCII.
+                JsStrVariant::Ascii(s) => unsafe { JsStr::ascii_unchecked(s.get_unchecked(index)) },
                 JsStrVariant::Latin1(v) => JsStr::latin1(v.get_unchecked(index)),
                 JsStrVariant::Utf16(v) => JsStr::utf16(v.get_unchecked(index)),
             }

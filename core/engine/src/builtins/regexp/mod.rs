@@ -1117,10 +1117,8 @@ impl RegExp {
         // 13.b. Let inputIndex be the index into input of the character that was obtained from element lastIndex of S.
         // 13.c. Let r be matcher(input, inputIndex).
         let r: Option<regress::Match> = match (full_unicode, input.as_str().variant()) {
-            (true | false, JsStrVariant::Ascii(s)) => {
-                matcher.find_from(s, last_index as usize).next()
-            }
-            (true | false, JsStrVariant::Latin1(_)) => {
+            (_, JsStrVariant::Ascii(s)) => matcher.find_from_ascii(s, last_index as usize).next(),
+            (_, JsStrVariant::Latin1(_)) => {
                 // TODO: Currently regress does not support latin1 encoding.
                 let input = input.to_vec();
 

@@ -125,11 +125,14 @@ fn concat() {
     const W: &[u16] = &ascii_to_utf16(b"!");
 
     let x = JsString::from("hello");
+    assert_eq!(x.kind(), JsStringKind::AsciiSequence);
     let z = JsString::from("world");
+    assert_eq!(z.kind(), JsStringKind::AsciiSequence);
 
     let xy = JsString::concat(x.as_str(), JsString::from(Y).as_str());
     assert_eq!(&xy, &ascii_to_utf16(b"hello, "));
     assert_eq!(xy.refcount(), Some(1));
+    assert_eq!(xy.kind(), JsStringKind::Utf16Sequence);
 
     let xyz = JsString::concat(xy.as_str(), z.as_str());
     assert_eq!(&xyz, &ascii_to_utf16(b"hello, world"));
@@ -137,6 +140,11 @@ fn concat() {
 
     let xyzw = JsString::concat(xyz.as_str(), JsString::from(W).as_str());
     assert_eq!(&xyzw, &ascii_to_utf16(b"hello, world!"));
+    assert_eq!(xyzw.refcount(), Some(1));
+
+    let xz = JsString::concat(x.as_str(), z.as_str());
+    assert_eq!(&xz, "helloworld");
+    assert_eq!(xz.kind(), JsStringKind::AsciiSequence);
     assert_eq!(xyzw.refcount(), Some(1));
 }
 

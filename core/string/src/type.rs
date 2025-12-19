@@ -63,7 +63,9 @@ impl InternalStringType for Ascii {
     }
 
     fn str_ctor(slice: &[Self::Byte]) -> JsStr<'_> {
-        JsStr::latin1(slice)
+        // SAFETY: This is valid UTF8 since it is ASCII.
+        let str = unsafe { str::from_utf8_unchecked(slice) };
+        JsStr::ascii(str)
     }
 
     unsafe fn write_header(ptr: *mut (), len: usize) {

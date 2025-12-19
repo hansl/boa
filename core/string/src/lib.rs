@@ -550,7 +550,8 @@ impl JsString {
                     let Some(count) = count.checked_add(string.len()) else {
                         alloc_overflow()
                     };
-                    if !string.is_latin1() {
+
+                    if !string.is_ascii() && !string.is_latin1() {
                         (Encoding::Utf16, count)
                     } else if encoding == Encoding::Ascii && !string.is_ascii() {
                         (Encoding::Latin1, count)
@@ -837,7 +838,6 @@ impl From<&[u16]> for JsString {
 impl From<&str> for JsString {
     #[inline]
     fn from(s: &str) -> Self {
-        // TODO: Check for ASCII encoding
         if s.is_ascii() {
             let js_str = JsStr::ascii(s);
             return StaticJsStrings::get_string(&js_str)

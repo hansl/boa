@@ -1,4 +1,4 @@
-use crate::r#type::{Latin1, StringType, Utf16};
+use crate::r#type::{Ascii, Latin1, StringType, Utf16};
 use crate::{JsStr, JsStrVariant, JsString, alloc_overflow};
 use std::{
     alloc::{Layout, alloc, dealloc, realloc},
@@ -573,6 +573,58 @@ impl Latin1JsStringBuilder {
     }
 }
 
+/// **`Ascii`** encoded `JsStringBuilder`
+/// # Warning
+/// If you are not sure the characters that will be added and don't want to preprocess them,
+/// use [`CommonJsStringBuilder`] instead.
+/// ## Examples
+///
+/// ```rust
+/// use boa_string::AsciiJsStringBuilder;
+/// let mut s = AsciiJsStringBuilder::new();
+/// s.push(b'x');
+/// s.extend_from_slice(&[b'1', b'2', b'3']);
+/// s.extend([b'1', b'2', b'3']);
+/// let js_string = s.build();
+/// ```
+pub type AsciiJsStringBuilder = JsStringBuilder<Ascii>;
+
+impl AsciiJsStringBuilder {
+    /// Builds a `JsString` if the current instance is strictly `ASCII`.
+    ///
+    /// When the string contains characters outside the `ASCII` range, it cannot be determined
+    /// whether the encoding is `Latin1` or others. Therefore, this method only returns a
+    /// valid `JsString` when the instance is entirely `ASCII`. If any non-`ASCII` characters
+    /// are present, it returns `None` to avoid ambiguity in encoding.
+    ///
+    /// If the caller is certain that the string is encoded in `Latin1`,
+    /// [`build_as_latin1`](Self::build_as_latin1) can be used to avoid the `ASCII` check.
+    #[inline]
+    #[must_use]
+    pub fn build(self) -> Option<JsString> {
+        if self.is_ascii() {
+            Some(self.build_inner())
+        } else {
+            None
+        }
+    }
+
+    /// Builds `JsString` from `Latin1JsStringBuilder`, assume that the inner data is `Latin1` encoded
+    ///
+    /// # Safety
+    /// Caller must ensure that the string is encoded in `Latin1`.
+    ///
+    /// If the string contains characters outside the `Latin1` range, it may lead to encoding errors,
+    /// resulting in an incorrect or malformed `JsString`. This could cause undefined behavior
+    /// when the resulting string is used in further operations or when interfacing with other
+    /// parts of the system that expect valid `Latin1` encoded string.
+    #[inline]
+    #[must_use]
+    pub unsafe fn build_as_ascii(self) -> JsString {
+        self.build_inner()
+    }
+}
+
 /// **`UTF-16`** encoded `JsStringBuilder`
 /// ## Examples
 ///
@@ -810,11 +862,13 @@ impl<'seg, 'ref_str: 'seg> CommonJsStringBuilder<'seg> {
                 Segment::String(s) => {
                     let js_str = s.as_str();
                     match js_str.variant() {
+                        JsStrVariant::Ascii(s) => builder.extend(s.chars().map(|c| c as u16)),
                         JsStrVariant::Latin1(s) => builder.extend(s.iter().copied().map(u16::from)),
                         JsStrVariant::Utf16(s) => builder.extend_from_slice(s),
                     }
                 }
                 Segment::Str(s) => match s.variant() {
+                    JsStrVariant::Ascii(s) => builder.extend(s.chars().map(|c| c as u16)),
                     JsStrVariant::Latin1(s) => builder.extend(s.iter().copied().map(u16::from)),
                     JsStrVariant::Utf16(s) => builder.extend_from_slice(s),
                 },
@@ -841,13 +895,14 @@ impl<'seg, 'ref_str: 'seg> CommonJsStringBuilder<'seg> {
         } else if self.is_ascii() {
             // SAFETY:
             // All string segment contains only ascii byte, so this can be encoded as `Latin1`.
-            unsafe { self.build_as_latin1() }
+            unsafe { self.build_as_ascii() }
         } else {
             self.build_from_utf16()
         }
     }
 
-    /// Builds `Latin1` encoded `JsString` from `CommonJsStringBuilder`, return `None` if segments can't be encoded as `Latin1`
+    /// Builds `ASCII` encoded `JsString` from `CommonJsStringBuilder`, return `None` if
+    /// segments can't be encoded as `Ascii`
     ///
     /// # Safety
     /// Caller must ensure that the string segments can be `Latin1` encoded.
@@ -858,29 +913,29 @@ impl<'seg, 'ref_str: 'seg> CommonJsStringBuilder<'seg> {
     /// parts of the system that expect valid `Latin1` encoded string.
     #[inline]
     #[must_use]
-    pub unsafe fn build_as_latin1(self) -> JsString {
-        let mut builder = Latin1JsStringBuilder::new();
+    pub unsafe fn build_as_ascii(self) -> JsString {
+        let mut builder = AsciiJsStringBuilder::new();
         for seg in self.segments {
             match seg {
                 Segment::String(s) => {
                     let js_str = s.as_str();
-                    let Some(s) = js_str.as_latin1() else {
+                    let Some(s) = js_str.as_ascii() else {
                         unreachable!("string segment should be latin1")
                     };
-                    builder.extend_from_slice(s);
+                    builder.extend_from_slice(s.as_bytes());
                 }
                 Segment::Str(s) => {
-                    let Some(s) = s.as_latin1() else {
+                    let Some(s) = s.as_ascii() else {
                         unreachable!("string segment should be latin1")
                     };
-                    builder.extend_from_slice(s);
+                    builder.extend_from_slice(s.as_bytes());
                 }
                 Segment::Latin1(latin1) => builder.push(latin1),
                 Segment::CodePoint(code_point) => builder.push(code_point as u8),
             }
         }
         // SAFETY: All string segments can be encoded as `Latin1` string.
-        unsafe { builder.build_as_latin1() }
+        unsafe { builder.build_as_ascii() }
     }
 }
 

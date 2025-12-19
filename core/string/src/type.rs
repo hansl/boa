@@ -45,6 +45,38 @@ pub trait StringType: InternalStringType + Sealed {
 
 #[allow(missing_copy_implementations)]
 #[derive(Debug)]
+pub struct Ascii;
+
+impl Sealed for Ascii {}
+impl StringType for Ascii {
+    type Char = u8;
+}
+
+#[allow(private_interfaces)]
+impl InternalStringType for Ascii {
+    const DATA_OFFSET: usize = size_of::<AsciiSequenceString>();
+    const KIND: JsStringKind = JsStringKind::AsciiSequence;
+    type Byte = u8;
+
+    fn base_layout() -> Layout {
+        Layout::new::<AsciiSequenceString>()
+    }
+
+    fn str_ctor(slice: &[Self::Byte]) -> JsStr<'_> {
+        JsStr::latin1(slice)
+    }
+
+    unsafe fn write_header(ptr: *mut (), len: usize) {
+        // SAFETY: Caller must ensure ptr is valid and aligned.
+        unsafe {
+            ptr.cast::<AsciiSequenceString>()
+                .write(AsciiSequenceString::new(len));
+        }
+    }
+}
+
+#[allow(missing_copy_implementations)]
+#[derive(Debug)]
 pub struct Latin1;
 
 impl Sealed for Latin1 {}
@@ -107,5 +139,6 @@ impl InternalStringType for Utf16 {
     }
 }
 
+pub(crate) type AsciiSequenceString = SequenceString<Ascii>;
 pub(crate) type Latin1SequenceString = SequenceString<Latin1>;
 pub(crate) type Utf16SequenceString = SequenceString<Utf16>;

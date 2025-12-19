@@ -123,13 +123,22 @@ impl ToJsString for Sym {
     fn to_js_string(&self, interner: &Interner) -> JsString {
         // TODO: Identify latin1 encodeable strings during parsing to avoid this check.
         let string = interner.resolve_expect(*self).utf16();
+        let mut is_ascii = true;
         for c in string {
-            if u8::try_from(*c).is_err() {
+            let Ok(c) = u8::try_from(*c) else {
                 return JsString::from(string);
+            };
+            if c >= 128 {
+                is_ascii = false;
             }
         }
         let string = string.iter().map(|c| *c as u8).collect::<Vec<_>>();
-        JsString::from(JsStr::latin1(&string))
+        if is_ascii {
+            // SAFETY: We validated all characters are ASCII.
+            JsString::from(JsStr::ascii(unsafe { str::from_utf8_unchecked(&string) }))
+        } else {
+            JsString::from(JsStr::latin1(&string))
+        }
     }
 }
 

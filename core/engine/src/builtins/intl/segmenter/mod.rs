@@ -64,6 +64,17 @@ impl NativeSegmenter {
     /// of the segments.
     pub(crate) fn segment<'l, 's>(&'l self, input: JsStr<'s>) -> NativeSegmentIterator<'l, 's> {
         match input.variant() {
+            crate::string::JsStrVariant::Ascii(input) => match self {
+                Self::Grapheme(g) => NativeSegmentIterator::GraphemeLatin1(
+                    g.as_borrowed().segment_latin1(input.as_bytes()),
+                ),
+                Self::Word(w) => NativeSegmentIterator::WordLatin1(
+                    w.as_borrowed().segment_latin1(input.as_bytes()),
+                ),
+                Self::Sentence(s) => NativeSegmentIterator::SentenceLatin1(
+                    s.as_borrowed().segment_latin1(input.as_bytes()),
+                ),
+            },
             crate::string::JsStrVariant::Latin1(input) => match self {
                 Self::Grapheme(g) => {
                     NativeSegmentIterator::GraphemeLatin1(g.as_borrowed().segment_latin1(input))

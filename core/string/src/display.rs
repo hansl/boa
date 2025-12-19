@@ -14,6 +14,7 @@ pub struct JsStrDisplayEscaped<'a> {
 impl fmt::Display for JsStrDisplayEscaped<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.inner.variant() {
+            JsStrVariant::Ascii(s) => f.write_str(s),
             // SAFETY: `JsStrVariant::Latin1` does not contain any unpaired surrogates, so need to check.
             JsStrVariant::Latin1(v) => v
                 .iter()
@@ -90,7 +91,9 @@ impl fmt::Debug for JsStringDebugInfo<'_> {
 
         // Show kind specific fields from string.
         match self.inner.kind() {
-            JsStringKind::Latin1Sequence | JsStringKind::Utf16Sequence => {
+            JsStringKind::AsciiSequence
+            | JsStringKind::Latin1Sequence
+            | JsStringKind::Utf16Sequence => {
                 if let Some(rc) = self.inner.refcount() {
                     dbg.borrow_mut().field("refcount", &rc);
                 }

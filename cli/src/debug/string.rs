@@ -35,6 +35,7 @@ fn encoding(_: &JsValue, args: &[JsValue], _: &mut Context) -> JsResult<JsValue>
 
     let str = string.as_str();
     let encoding = match str.variant() {
+        JsStrVariant::Ascii(_) => "ascii",
         JsStrVariant::Latin1(_) => "latin1",
         JsStrVariant::Utf16(_) => "utf16",
     };
@@ -56,6 +57,7 @@ fn summary(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsV
 
     let storage = if string.is_static() { "static" } else { "heap" };
     let encoding = match string.as_str().variant() {
+        JsStrVariant::Ascii(_) => "ascii",
         JsStrVariant::Latin1(_) => "latin1",
         JsStrVariant::Utf16(_) => "utf16",
     };

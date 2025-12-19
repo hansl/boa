@@ -26,7 +26,8 @@ mod tests;
 
 use self::{iter::Windows, str::JsSliceIndex};
 use crate::display::{JsStrDisplayEscaped, JsStrDisplayLossy, JsStringDebugInfo};
-use crate::r#type::{Latin1, Latin1SequenceString, StringType, Utf16, Utf16SequenceString};
+use crate::r#type::sealed::InternalStringType;
+use crate::r#type::{Ascii, Latin1, StringType, Utf16};
 pub use crate::vtable::StaticString;
 use crate::vtable::{SequenceString, SliceString};
 #[doc(inline)]
@@ -95,17 +96,20 @@ pub(crate) const fn is_trimmable_whitespace_latin1(c: u8) -> bool {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub(crate) enum JsStringKind {
+    /// A sequencial memory slice of Ascii bytes (bytes between `0..=127`).
+    AsciiSequence,
+
     /// A sequential memory slice of Latin1 bytes. See [`Latin1SequenceString`].
-    Latin1Sequence = 0,
+    Latin1Sequence,
 
     /// A sequential memory slice of UTF-16 code units. See [`Utf16SequenceString`].
-    Utf16Sequence = 1,
+    Utf16Sequence,
 
     /// A slice of an existing string. See [`SliceString`].
-    Slice = 2,
+    Slice,
 
     /// A static string that is valid for `'static` lifetime.
-    Static = 3,
+    Static,
 }
 
 /// A Latin1 or UTF-16–encoded, reference counted, immutable string.
@@ -469,22 +473,7 @@ impl JsString {
     #[inline]
     #[must_use]
     pub unsafe fn slice_unchecked(data: &JsString, start: usize, end: usize) -> Self {
-        let str = data.as_str();
-        let is_latin1 = str.is_latin1();
-        let data_ptr = str.as_ptr();
-
-        // Calculate the offset based on encoding
-        // SAFETY: start is within bounds per caller contract.
-        let offset_ptr = unsafe {
-            if is_latin1 {
-                data_ptr.add(start)
-            } else {
-                // For UTF-16, each char is 2 bytes.
-                data_ptr.byte_add(start * 2)
-            }
-        };
-
-        let slice = Box::new(SliceString::new(data, offset_ptr, end - start, is_latin1));
+        let slice = Box::new(SliceString::new(data, start, end));
 
         Self {
             ptr: NonNull::from(Box::leak(slice)).cast(),
@@ -546,73 +535,111 @@ impl JsString {
     #[inline]
     #[must_use]
     pub fn concat_array(strings: &[JsStr<'_>]) -> Self {
-        let mut latin1_encoding = true;
-        let mut full_count = 0usize;
-        for string in strings {
-            let Some(sum) = full_count.checked_add(string.len()) else {
-                alloc_overflow()
-            };
-            if !string.is_latin1() {
-                latin1_encoding = false;
-            }
-            full_count = sum;
+        #[derive(Copy, Clone, Eq, PartialEq)]
+        enum Encoding {
+            Ascii,
+            Latin1,
+            Utf16,
         }
 
-        let (ptr, data_offset) = if latin1_encoding {
-            let p = Self::allocate_seq::<Latin1>(full_count);
-            (p.cast::<u8>(), size_of::<Latin1SequenceString>())
-        } else {
-            let p = Self::allocate_seq::<Utf16>(full_count);
-            (p.cast::<u8>(), size_of::<Utf16SequenceString>())
+        // Calculate total length and encoding.
+        let (encoding, full_count) =
+            strings
+                .iter()
+                .fold((Encoding::Ascii, 0usize), |(encoding, count), string| {
+                    let Some(count) = count.checked_add(string.len()) else {
+                        alloc_overflow()
+                    };
+                    if !string.is_latin1() {
+                        (Encoding::Utf16, count)
+                    } else if encoding == Encoding::Ascii && !string.is_ascii() {
+                        (Encoding::Latin1, count)
+                    } else {
+                        (encoding, count)
+                    }
+                });
+
+        let (string, data_ptr) = match encoding {
+            // Ascii and Latin1 take the same amount of space.
+            Encoding::Ascii => {
+                let ptr = Self::allocate_seq::<Ascii>(full_count);
+                // SAFETY: Just allocated and validated.
+                (Self { ptr: ptr.cast() }, unsafe {
+                    ptr.cast::<u8>().add(Ascii::DATA_OFFSET)
+                })
+            }
+            Encoding::Latin1 => {
+                let ptr = Self::allocate_seq::<Latin1>(full_count);
+                // SAFETY: Just allocated and validated.
+                (Self { ptr: ptr.cast() }, unsafe {
+                    ptr.cast::<u8>().add(Latin1::DATA_OFFSET)
+                })
+            }
+            Encoding::Utf16 => {
+                let ptr = Self::allocate_seq::<Utf16>(full_count);
+                // SAFETY: Just allocated and validated.
+                (Self { ptr: ptr.cast() }, unsafe {
+                    ptr.cast::<u8>().add(Utf16::DATA_OFFSET)
+                })
+            }
         };
 
-        let string = {
-            // SAFETY: `allocate_*_seq` guarantees that `ptr` is a valid pointer to a sequence string.
-            let mut data = unsafe {
-                let seq_ptr = ptr.as_ptr();
-                seq_ptr.add(data_offset)
-            };
-            for &string in strings {
-                // SAFETY:
-                // The sum of all `count` for each `string` equals `full_count`, and since we're
-                // iteratively writing each of them to `data`, `copy_non_overlapping` always stays
-                // in-bounds for `count` reads of each string and `full_count` writes to `data`.
-                //
-                // Each `string` must be properly aligned to be a valid slice, and `data` must be
-                // properly aligned by `allocate_inner`.
-                //
-                // `allocate_inner` must return a valid pointer to newly allocated memory, meaning
-                // `ptr` and all `string`s should never overlap.
-                unsafe {
-                    // NOTE: The alignment is checked when we allocate the array.
-                    #[allow(clippy::cast_ptr_alignment)]
-                    match (latin1_encoding, string.variant()) {
-                        (true, JsStrVariant::Latin1(s)) => {
-                            let count = s.len();
-                            ptr::copy_nonoverlapping(s.as_ptr(), data.cast::<u8>(), count);
-                            data = data.cast::<u8>().add(count).cast::<u8>();
+        let mut data_ptr = data_ptr.as_ptr();
+
+        for &string in strings {
+            // SAFETY:
+            // The sum of all `count` for each `string` equals `full_count`, and since we're
+            // iteratively writing each of them to `data`, `copy_non_overlapping` always stays
+            // in-bounds for `count` reads of each string and `full_count` writes to `data`.
+            //
+            // Each `string` must be properly aligned to be a valid slice, and `data` must be
+            // properly aligned by `allocate_inner`.
+            //
+            // `allocate_inner` must return a valid pointer to newly allocated memory, meaning
+            // `ptr` and all `string`s should never overlap.
+            unsafe {
+                // NOTE: The alignment is checked when we allocate the array.
+                #[allow(clippy::cast_ptr_alignment)]
+                match (encoding, string.variant()) {
+                    (Encoding::Ascii | Encoding::Latin1, JsStrVariant::Ascii(s)) => {
+                        let count = s.len();
+                        ptr::copy_nonoverlapping(s.as_ptr(), data_ptr, count);
+                        data_ptr = data_ptr.add(count);
+                    }
+                    (Encoding::Latin1, JsStrVariant::Latin1(s)) => {
+                        let count = s.len();
+                        ptr::copy_nonoverlapping(s.as_ptr(), data_ptr, count);
+                        data_ptr = data_ptr.add(count);
+                    }
+                    (Encoding::Utf16, JsStrVariant::Ascii(s)) => {
+                        let count = s.len();
+                        let slice: &mut [u16] =
+                            std::slice::from_raw_parts_mut(data_ptr.cast(), count);
+                        for (i, byte) in s.as_bytes().iter().enumerate() {
+                            slice[i] = u16::from(*byte);
                         }
-                        (false, JsStrVariant::Latin1(s)) => {
-                            let count = s.len();
-                            for (i, byte) in s.iter().enumerate() {
-                                *data.cast::<u16>().add(i) = u16::from(*byte);
-                            }
-                            data = data.cast::<u16>().add(count).cast::<u8>();
+                        data_ptr = data_ptr.cast::<u16>().add(count).cast();
+                    }
+                    (Encoding::Utf16, JsStrVariant::Latin1(s)) => {
+                        let count = s.len();
+                        let slice: &mut [u16] =
+                            std::slice::from_raw_parts_mut(data_ptr.cast(), count);
+                        for (i, byte) in s.iter().enumerate() {
+                            slice[i] = u16::from(*byte);
                         }
-                        (false, JsStrVariant::Utf16(s)) => {
-                            let count = s.len();
-                            ptr::copy_nonoverlapping(s.as_ptr(), data.cast::<u16>(), count);
-                            data = data.cast::<u16>().add(count).cast::<u8>();
-                        }
-                        (true, JsStrVariant::Utf16(_)) => {
-                            unreachable!("Already checked that it's latin1 encoding")
-                        }
+                        data_ptr = data_ptr.cast::<u16>().add(count).cast();
+                    }
+                    (Encoding::Utf16, JsStrVariant::Utf16(s)) => {
+                        let count = s.len();
+                        ptr::copy_nonoverlapping(s.as_ptr(), data_ptr.cast::<u16>(), count);
+                        data_ptr = data_ptr.cast::<u16>().add(count).cast::<u8>();
+                    }
+                    (_, _) => {
+                        unreachable!("Already checked that it's the right encoding")
                     }
                 }
             }
-
-            Self { ptr: ptr.cast() }
-        };
+        }
 
         StaticJsStrings::get_string(&string.as_str()).unwrap_or(string)
     }
@@ -705,17 +732,24 @@ impl JsString {
             // NOTE: The alignment is checked when we allocate the array.
             #[allow(clippy::cast_ptr_alignment)]
             match string.variant() {
+                JsStrVariant::Ascii(s) => {
+                    let ptr = Self::allocate_seq::<Ascii>(count);
+                    let data = (&raw mut (*ptr.as_ptr()).data)
+                        .cast::<<Ascii as InternalStringType>::Byte>();
+                    ptr::copy_nonoverlapping(s.as_ptr(), data, count);
+                    Self { ptr: ptr.cast() }
+                }
                 JsStrVariant::Latin1(s) => {
                     let ptr = Self::allocate_seq::<Latin1>(count);
                     let data = (&raw mut (*ptr.as_ptr()).data)
-                        .cast::<<Latin1 as r#type::sealed::InternalStringType>::Byte>();
+                        .cast::<<Latin1 as InternalStringType>::Byte>();
                     ptr::copy_nonoverlapping(s.as_ptr(), data, count);
                     Self { ptr: ptr.cast() }
                 }
                 JsStrVariant::Utf16(s) => {
                     let ptr = Self::allocate_seq::<Utf16>(count);
                     let data = (&raw mut (*ptr.as_ptr()).data)
-                        .cast::<<Utf16 as r#type::sealed::InternalStringType>::Byte>();
+                        .cast::<<Utf16 as InternalStringType>::Byte>();
                     ptr::copy_nonoverlapping(s.as_ptr(), data, count);
                     Self { ptr: ptr.cast() }
                 }
@@ -778,8 +812,8 @@ macro_rules! impl_from_number_for_js_string {
                 impl From<$ty> for JsString {
                     #[inline]
                     fn from(value: $ty) -> Self {
-                        JsString::from_slice_skip_interning(JsStr::latin1(
-                            $module::Buffer::new().format(value).as_bytes(),
+                        JsString::from_slice_skip_interning(JsStr::ascii(
+                            $module::Buffer::new().format(value),
                         ))
                     }
                 }
@@ -803,9 +837,9 @@ impl From<&[u16]> for JsString {
 impl From<&str> for JsString {
     #[inline]
     fn from(s: &str) -> Self {
-        // TODO: Check for latin1 encoding
+        // TODO: Check for ASCII encoding
         if s.is_ascii() {
-            let js_str = JsStr::latin1(s.as_bytes());
+            let js_str = JsStr::ascii(s);
             return StaticJsStrings::get_string(&js_str)
                 .unwrap_or_else(|| JsString::from_slice_skip_interning(js_str));
         }

@@ -19,6 +19,7 @@ pub struct Iter<'a> {
 impl<'a> Iter<'a> {
     pub(crate) fn new(s: JsStr<'a>) -> Self {
         let inner = match s.variant() {
+            JsStrVariant::Ascii(s) => IterInner::U8(s.as_bytes().into_iter().copied()),
             JsStrVariant::Latin1(s) => IterInner::U8(s.iter().copied()),
             JsStrVariant::Utf16(s) => IterInner::U16(s.iter().copied()),
         };
@@ -67,6 +68,7 @@ pub struct Windows<'a> {
 impl<'a> Windows<'a> {
     pub(crate) fn new(string: JsStr<'a>, size: usize) -> Self {
         let inner = match string.variant() {
+            JsStrVariant::Ascii(s) => WindowsInner::U8(s.as_bytes().windows(size)),
             JsStrVariant::Latin1(v) => WindowsInner::U8(v.windows(size)),
             JsStrVariant::Utf16(v) => WindowsInner::U16(v.windows(size)),
         };
@@ -100,7 +102,7 @@ impl ExactSizeIterator for Windows<'_> {
 
 #[derive(Debug, Clone)]
 enum CodePointsIterInner<'a> {
-    Latin1(std::iter::Copied<std::slice::Iter<'a, u8>>),
+    Latin1(std::slice::Iter<'a, u8>),
     Utf16(std::char::DecodeUtf16<std::iter::Copied<std::slice::Iter<'a, u16>>>),
 }
 
@@ -112,7 +114,8 @@ pub struct CodePointsIter<'a> {
 impl<'a> CodePointsIter<'a> {
     pub(crate) fn new(s: JsStr<'a>) -> Self {
         let inner = match s.variant() {
-            JsStrVariant::Latin1(s) => CodePointsIterInner::Latin1(s.iter().copied()),
+            JsStrVariant::Ascii(s) => CodePointsIterInner::Latin1(s.as_bytes().into_iter()),
+            JsStrVariant::Latin1(s) => CodePointsIterInner::Latin1(s.into_iter()),
             JsStrVariant::Utf16(s) => {
                 CodePointsIterInner::Utf16(char::decode_utf16(s.iter().copied()))
             }
@@ -128,7 +131,7 @@ impl Iterator for CodePointsIter<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.inner {
             CodePointsIterInner::Latin1(iter) => {
-                iter.next().map(|b| CodePoint::Unicode(char::from(b)))
+                iter.next().map(|b| CodePoint::Unicode(char::from(*b)))
             }
             CodePointsIterInner::Utf16(iter) => iter.next().map(|res| match res {
                 Ok(c) => CodePoint::Unicode(c),

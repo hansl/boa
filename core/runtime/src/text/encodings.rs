@@ -3,6 +3,12 @@ pub(crate) mod utf8 {
     use boa_engine::string::CodePoint;
 
     pub(crate) fn encode(input: &JsString) -> Vec<u8> {
+        use boa_engine::string::JsStrVariant;
+        // Fast path.
+        if let JsStrVariant::Ascii(s) = input.as_str().variant() {
+            return s.as_bytes().to_vec();
+        }
+
         input
             .code_points()
             .flat_map(|s| match s {
@@ -24,6 +30,8 @@ pub(crate) mod utf16le {
 
     pub(crate) fn encode(input: &JsString) -> Vec<u8> {
         match input.as_str().variant() {
+            // Default UTF-16 encoding is le.
+            JsStrVariant::Ascii(s) => s.as_bytes().iter().flat_map(|c| [*c, 0]).collect(),
             JsStrVariant::Latin1(l) => l.iter().flat_map(|c| [*c, 0]).collect(),
             JsStrVariant::Utf16(s) => bytemuck::cast_slice(s).to_vec(),
         }
@@ -54,6 +62,7 @@ pub(crate) mod utf16be {
 
     pub(crate) fn encode(input: &JsString) -> Vec<u8> {
         match input.as_str().variant() {
+            JsStrVariant::Ascii(l) => l.as_bytes().iter().flat_map(|c| [0, *c]).collect(),
             JsStrVariant::Latin1(l) => l.iter().flat_map(|c| [0, *c]).collect(),
             JsStrVariant::Utf16(s) => s.iter().flat_map(|b| b.to_be_bytes()).collect::<Vec<_>>(),
         }

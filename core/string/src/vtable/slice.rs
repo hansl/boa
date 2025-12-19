@@ -1,5 +1,5 @@
 use crate::vtable::JsStringVTable;
-use crate::{JsStr, JsString, JsStringKind};
+use crate::{JsStr, JsStrVariant, JsString, JsStringKind};
 use std::cell::Cell;
 use std::process::abort;
 use std::ptr::NonNull;
@@ -11,13 +11,8 @@ pub(crate) struct SliceString {
     vtable: JsStringVTable,
     // Keep this for refcounting the original string.
     owned: JsString,
-    // Pointer to the data itself. This is guaranteed to be safe as long as `owned` is
-    // owned.
-    data: NonNull<u8>,
-    // Length of this string slice.
-    len: usize,
-    // Whether the string is Latin1 encoded.
-    is_latin1: bool,
+    // Variant of the string pointed at.
+    variant: JsStrVariant<'static>,
     // Refcount for this string as we need to clone/drop it as well.
     refcount: Cell<usize>,
 }
@@ -26,20 +21,23 @@ impl SliceString {
     /// Create a new slice string given its members.
     #[inline]
     #[must_use]
-    pub(crate) fn new(owned: &JsString, data: NonNull<u8>, len: usize, is_latin1: bool) -> Self {
+    pub(crate) fn new(owned: &JsString, start: usize, end: usize) -> Self {
+        let variant = owned.as_str().variant();
+        // SAFETY: We own the string this variant points to, so it can be marked as
+        // 'static.
+        let variant: JsStrVariant<'static> = unsafe { JsStrVariant::to_static(variant) };
+
         SliceString {
             vtable: JsStringVTable {
                 clone: slice_clone,
                 drop: slice_drop,
                 as_str: slice_as_str,
                 refcount: slice_refcount,
-                len,
+                len: end - start,
                 kind: JsStringKind::Slice,
             },
             owned: owned.clone(),
-            data,
-            len,
-            is_latin1,
+            variant: variant.slice(start, end),
             refcount: Cell::new(1),
         }
     }
@@ -84,19 +82,7 @@ fn slice_drop(vtable: NonNull<JsStringVTable>) {
 fn slice_as_str(vtable: NonNull<JsStringVTable>) -> JsStr<'static> {
     // SAFETY: This is part of the correct vtable which is validated on construction.
     let this: &SliceString = unsafe { vtable.cast().as_ref() };
-    let len = this.len;
-    let is_latin1 = this.is_latin1;
-    let data_ptr = this.data.as_ptr();
-
-    // SAFETY: SliceString data points to valid memory owned by owned.
-    unsafe {
-        if is_latin1 {
-            JsStr::latin1(std::slice::from_raw_parts(data_ptr, len))
-        } else {
-            #[allow(clippy::cast_ptr_alignment)]
-            JsStr::utf16(std::slice::from_raw_parts(data_ptr.cast::<u16>(), len))
-        }
-    }
+    JsStr::from(this.variant)
 }
 
 /// `VTable` function for refcount, need to return an `Option<usize>`.

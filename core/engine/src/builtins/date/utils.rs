@@ -755,6 +755,7 @@ pub(super) fn parse_date(date: &JsString, hooks: &dyn HostHooks) -> Option<i64> 
     // All characters must be ASCII so we can return early if we find a non-ASCII character.
     let owned_js_str = date.as_str();
     let date = match owned_js_str.variant() {
+        JsStrVariant::Ascii(s) => Cow::Borrowed(s),
         JsStrVariant::Latin1(s) => {
             if !s.is_ascii() {
                 return None;

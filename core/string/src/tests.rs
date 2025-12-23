@@ -177,12 +177,14 @@ fn conversion_to_known_static_js_string() {
     let string = StaticJsStrings::get_string(JS_STR_U8);
 
     assert!(string.is_some());
-    assert!(string.unwrap().as_str().is_latin1());
+    // This is ASCII because the constants are ASCII, not Latin1.
+    assert!(string.unwrap().as_str().is_ascii());
 
     let string = StaticJsStrings::get_string(JS_STR_U16);
 
     assert!(string.is_some());
-    assert!(string.unwrap().as_str().is_latin1());
+    // Same logic as above.
+    assert!(string.unwrap().as_str().is_ascii());
 }
 
 #[test]
@@ -539,7 +541,7 @@ fn slice() {
 
 #[test]
 fn split() {
-    let base_str = JsString::from("Héllo World");
+    let base_str = JsString::from(JsStr::latin1(b"H\xe9llo World"));
     assert_eq!(base_str.kind(), JsStringKind::Latin1Sequence);
 
     let str1 = base_str.slice(0, 5);

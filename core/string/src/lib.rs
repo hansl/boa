@@ -777,11 +777,14 @@ impl From<&str> for JsString {
     fn from(s: &str) -> Self {
         if s.is_ascii() {
             let js_str = JsStr::ascii(s);
-            return StaticJsStrings::get_string(&js_str)
-                .unwrap_or_else(|| JsString::from_slice_skip_interning(js_str));
+            StaticJsStrings::get_string(&js_str)
+                .unwrap_or_else(|| JsString::from_slice_skip_interning(js_str))
+        } else {
+            // TODO: Should we check for Latin1? It would require re-allocating
+            //       the buffer as UTF-8 encodes 128..=255 with 2 bytes.
+            let s = s.encode_utf16().collect::<Vec<_>>();
+            JsString::from_slice_skip_interning(JsStr::utf16(&s[..]))
         }
-        let s = s.encode_utf16().collect::<Vec<_>>();
-        JsString::from_slice_skip_interning(JsStr::utf16(&s[..]))
     }
 }
 

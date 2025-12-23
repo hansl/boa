@@ -1,5 +1,5 @@
 use crate::r#type::{Ascii, Latin1, StringType, Utf16};
-use crate::{JsStr, JsStrVariant, JsString, alloc_overflow};
+use crate::{JsStr, JsStrVariant, JsString, SequenceString, alloc_overflow};
 use std::{
     alloc::{Layout, alloc, dealloc, realloc},
     marker::PhantomData,
@@ -14,7 +14,7 @@ use std::{
 pub struct JsStringBuilder<D: StringType> {
     cap: usize,
     len: usize,
-    inner: NonNull<u8>,
+    inner: NonNull<SequenceString<D>>,
     phantom_data: PhantomData<D>,
 }
 
@@ -121,8 +121,8 @@ impl<D: StringType> JsStringBuilder<D> {
         // SAFETY:
         // Caller should ensure that the inner is allocated.
         unsafe {
-            D::base_layout()
-                .extend(Layout::array::<D>(self.capacity()).unwrap_unchecked())
+            Layout::for_value(self.inner.as_ref())
+                .extend(Layout::array::<D::Byte>(self.capacity()).unwrap_unchecked())
                 .unwrap_unchecked()
                 .0
                 .pad_to_align()
@@ -136,9 +136,9 @@ impl<D: StringType> JsStringBuilder<D> {
     /// Caller should ensure that the inner is allocated.
     #[must_use]
     const unsafe fn data(&self) -> *mut D::Char {
-        let seq_ptr = self.inner.as_ptr();
+        let seq_ptr: *mut D::Char = self.inner.as_ptr().cast();
         // SAFETY: Caller should ensure that the inner is allocated.
-        unsafe { seq_ptr.add(D::DATA_OFFSET).cast() }
+        unsafe { seq_ptr.byte_add(D::DATA_OFFSET) }
     }
 
     /// Allocates when there is not sufficient capacity.
@@ -164,14 +164,15 @@ impl<D: StringType> JsStringBuilder<D> {
             // Valid pointer is required by `realloc` and pointer is checked above to be valid.
             // The layout size of the sequence string is never zero, since it has to store
             // the length of the string and the reference count.
-            unsafe { realloc(old_ptr, old_layout, new_layout.size()) }
+            unsafe { realloc(old_ptr.cast(), old_layout, new_layout.size()) }
         } else {
             // SAFETY:
             // The layout size of the sequence string is never zero, since it has to store
             // the length of the string and the reference count.
             unsafe { alloc(new_layout) }
         };
-        let Some(new_ptr) = NonNull::new(new_ptr) else {
+
+        let Some(new_ptr) = NonNull::new(new_ptr.cast::<SequenceString<D>>()) else {
             std::alloc::handle_alloc_error(new_layout)
         };
         self.inner = new_ptr;
@@ -221,8 +222,8 @@ impl<D: StringType> JsStringBuilder<D> {
     }
 
     fn new_layout(cap: usize) -> Layout {
-        let new_layout = Layout::array::<D>(cap)
-            .and_then(|arr| D::base_layout().extend(arr))
+        let new_layout = Layout::array::<D::Char>(cap)
+            .and_then(|arr| Layout::new::<SequenceString<D>>().extend(arr))
             .map(|(layout, offset)| (layout.pad_to_align(), offset))
             .map_err(|_| None);
         match new_layout {
@@ -368,7 +369,7 @@ impl<D: StringType> JsStringBuilder<D> {
         // `NonNull` verified for us that the pointer returned by `alloc` is valid,
         // meaning we can write to its pointed memory.
         unsafe {
-            D::write_header(inner.as_ptr().cast(), len);
+            inner.as_ptr().write(SequenceString::<D>::new(len));
         }
 
         // Tell the compiler not to call the destructor of `JsStringBuilder`,
@@ -393,7 +394,7 @@ impl<D: StringType> Drop for JsStringBuilder<D> {
             // `NonNull` verified for us that the pointer returned by `alloc` is valid,
             // meaning we can free its pointed memory.
             unsafe {
-                dealloc(self.inner.as_ptr(), layout);
+                dealloc(self.inner.as_ptr().cast(), layout);
             }
         }
     }

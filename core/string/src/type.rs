@@ -28,12 +28,6 @@ pub(crate) mod sealed {
 
         /// Construct a [`JsStr`] from a slice of characters.
         fn str_ctor(slice: &[Self::Byte]) -> JsStr<'_>;
-
-        /// Write the sequence string header to the given pointer.
-        ///
-        /// # Safety
-        /// The pointer must be valid and properly aligned for writing.
-        unsafe fn write_header(ptr: *mut (), len: usize);
     }
 }
 use sealed::{InternalStringType, Sealed};
@@ -54,12 +48,12 @@ impl StringType for Ascii {
 
 #[allow(private_interfaces)]
 impl InternalStringType for Ascii {
-    const DATA_OFFSET: usize = size_of::<AsciiSequenceString>();
+    const DATA_OFFSET: usize = size_of::<SequenceString<Self>>();
     const KIND: JsStringKind = JsStringKind::AsciiSequence;
     type Byte = u8;
 
     fn base_layout() -> Layout {
-        Layout::new::<AsciiSequenceString>()
+        Layout::new::<SequenceString<Ascii>>()
     }
 
     fn str_ctor(slice: &[Self::Byte]) -> JsStr<'_> {
@@ -67,19 +61,13 @@ impl InternalStringType for Ascii {
         let str = unsafe { str::from_utf8_unchecked(slice) };
         JsStr::ascii(str)
     }
-
-    unsafe fn write_header(ptr: *mut (), len: usize) {
-        // SAFETY: Caller must ensure ptr is valid and aligned.
-        unsafe {
-            ptr.cast::<AsciiSequenceString>()
-                .write(AsciiSequenceString::new(len));
-        }
-    }
 }
 
+// It is good defensive programming to have [`Latin1`] `!Copy`, as it should
+// not be used as a value anyway.
 #[allow(missing_copy_implementations)]
 #[derive(Debug)]
-pub struct Latin1;
+pub enum Latin1 {}
 
 impl Sealed for Latin1 {}
 impl StringType for Latin1 {
@@ -88,30 +76,24 @@ impl StringType for Latin1 {
 
 #[allow(private_interfaces)]
 impl InternalStringType for Latin1 {
-    const DATA_OFFSET: usize = size_of::<Latin1SequenceString>();
+    const DATA_OFFSET: usize = size_of::<SequenceString<Self>>();
     const KIND: JsStringKind = JsStringKind::Latin1Sequence;
     type Byte = u8;
 
     fn base_layout() -> Layout {
-        Layout::new::<Latin1SequenceString>()
+        Layout::new::<SequenceString<Self>>()
     }
 
     fn str_ctor(slice: &[Self::Byte]) -> JsStr<'_> {
         JsStr::latin1(slice)
     }
-
-    unsafe fn write_header(ptr: *mut (), len: usize) {
-        // SAFETY: Caller must ensure ptr is valid and aligned.
-        unsafe {
-            ptr.cast::<Latin1SequenceString>()
-                .write(Latin1SequenceString::new(len));
-        }
-    }
 }
 
+// It is good defensive programming to have [`Utf16`] `!Copy`, as it should
+// not be used as a value anyway.
 #[allow(missing_copy_implementations)]
 #[derive(Debug)]
-pub struct Utf16;
+pub enum Utf16 {}
 
 impl Sealed for Utf16 {}
 impl StringType for Utf16 {
@@ -120,27 +102,15 @@ impl StringType for Utf16 {
 
 #[allow(private_interfaces)]
 impl InternalStringType for Utf16 {
-    const DATA_OFFSET: usize = size_of::<Utf16SequenceString>();
+    const DATA_OFFSET: usize = size_of::<SequenceString<Self>>();
     const KIND: JsStringKind = JsStringKind::Utf16Sequence;
     type Byte = u16;
 
     fn base_layout() -> Layout {
-        Layout::new::<Utf16SequenceString>()
+        Layout::new::<SequenceString<Self>>()
     }
 
     fn str_ctor(slice: &[Self::Byte]) -> JsStr<'_> {
         JsStr::utf16(slice)
     }
-
-    unsafe fn write_header(ptr: *mut (), len: usize) {
-        // SAFETY: Caller must ensure ptr is valid.
-        unsafe {
-            ptr.cast::<Utf16SequenceString>()
-                .write(Utf16SequenceString::new(len));
-        }
-    }
 }
-
-pub(crate) type AsciiSequenceString = SequenceString<Ascii>;
-pub(crate) type Latin1SequenceString = SequenceString<Latin1>;
-pub(crate) type Utf16SequenceString = SequenceString<Utf16>;

@@ -4,7 +4,6 @@ use crate::{
     display::{JsStrDisplayEscaped, JsStrDisplayLossy},
     is_trimmable_whitespace, is_trimmable_whitespace_latin1,
 };
-use std::ptr::NonNull;
 use std::{
     hash::{Hash, Hasher},
     slice::SliceIndex,
@@ -169,18 +168,6 @@ impl<'a> JsStr<'a> {
     #[must_use]
     pub const fn variant(self) -> JsStrVariant<'a> {
         self.inner
-    }
-
-    /// Returns a pointer to the start of the data.
-    #[inline]
-    #[must_use]
-    pub(crate) const fn as_ptr(&self) -> NonNull<u8> {
-        match self.inner {
-            // SAFETY: value is always pointing to valid memory.
-            JsStrVariant::Ascii(value) => NonNull::from_ref(value).cast(),
-            JsStrVariant::Latin1(value) => NonNull::from_ref(&value[0]),
-            JsStrVariant::Utf16(value) => NonNull::from_ref(&value[0]).cast(),
-        }
     }
 
     /// Check if the [`JsStr`] is ascii encoded.

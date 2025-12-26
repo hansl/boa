@@ -40,7 +40,9 @@ pub use crate::{
     iter::Iter,
     str::{JsStr, JsStrVariant},
 };
+use std::collections::Bound;
 use std::marker::PhantomData;
+use std::ops::RangeBounds;
 use std::{borrow::Cow, mem::ManuallyDrop};
 use std::{
     convert::Infallible,
@@ -493,10 +495,18 @@ impl JsString {
     /// range. Returns None if the start/end is invalid.
     #[inline]
     #[must_use]
-    pub fn slice(&self, p1: usize, mut p2: usize) -> JsString {
-        if p2 > self.len() {
-            p2 = self.len();
-        }
+    pub fn slice(&self, slice: impl RangeBounds<usize>) -> JsString {
+        let p1 = match slice.start_bound() {
+            Bound::Included(start) => *start,
+            Bound::Excluded(start) => *start + 1,
+            Bound::Unbounded => usize::MIN,
+        };
+        let p2 = match slice.end_bound() {
+            Bound::Included(end) => end.saturating_add(1).min(self.len()),
+            Bound::Excluded(end) => (*end).min(self.len()),
+            Bound::Unbounded => self.len(),
+        };
+
         if p1 >= p2 {
             StaticJsStrings::EMPTY_STRING
         } else {

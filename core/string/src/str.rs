@@ -116,7 +116,7 @@ impl<'a> JsStr<'a> {
     /// be between `0..=127`.
     #[inline]
     #[must_use]
-    const unsafe fn ascii_unchecked(value: &'a str) -> Self {
+    pub(crate) const unsafe fn ascii_unchecked(value: &'a str) -> Self {
         Self {
             inner: JsStrVariant::Ascii(value),
         }

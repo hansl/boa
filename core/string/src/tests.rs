@@ -40,10 +40,10 @@ fn refcount() {
         assert_eq!(y.refcount(), Some(2));
 
         {
-            let z = y.clone();
+            let z = y.slice(2..5);
             assert_eq!(x.refcount(), Some(3));
             assert_eq!(y.refcount(), Some(3));
-            assert_eq!(z.refcount(), Some(3));
+            assert_eq!(z.refcount(), Some(1));
         }
 
         assert_eq!(x.refcount(), Some(2));
@@ -508,35 +508,35 @@ fn slice() {
         let base_str = JsString::from("Hello World");
         assert_eq!(base_str.kind(), JsStringKind::AsciiSequence);
 
-        base_str.slice(1, 5)
+        base_str.slice(1..5)
     };
     assert_eq!(sliced, JsString::from("ello"));
     assert_eq!(sliced.kind(), JsStringKind::Slice);
 
-    let sliced2 = sliced.slice(1, 3);
+    let sliced2 = sliced.slice(1..3);
     drop(sliced);
     assert_eq!(sliced2, JsString::from("ll"));
     assert_eq!(sliced2.kind(), JsStringKind::Slice);
 
-    let sliced3 = sliced2.slice(0, 2);
+    let sliced3 = sliced2.slice(0..2);
     drop(sliced2);
     assert_eq!(sliced3, JsString::from("ll"));
     assert_eq!(sliced3.kind(), JsStringKind::Slice);
 
-    let sliced4 = sliced3.slice(0, 2);
+    let sliced4 = sliced3.slice(0..2);
     drop(sliced3);
     assert_eq!(sliced4, JsString::from("ll"));
     assert_eq!(sliced4.kind(), JsStringKind::Slice);
 
-    let sliced4 = sliced4.slice(0, 2);
+    let sliced4 = sliced4.slice(0..2);
     assert_eq!(sliced4, JsString::from("ll"));
     assert_eq!(sliced4.kind(), JsStringKind::Slice);
 
-    let sliced5 = sliced4.slice(1, 1);
+    let sliced5 = sliced4.slice(1..1);
     assert_eq!(sliced5, JsString::from(""));
     assert_eq!(sliced5.kind(), JsStringKind::Static);
 
-    assert_eq!(sliced5.slice(4, 4), StaticJsStrings::EMPTY_STRING);
+    assert_eq!(sliced5.slice(4..4), StaticJsStrings::EMPTY_STRING);
 }
 
 #[test]
@@ -544,8 +544,8 @@ fn split() {
     let base_str = JsString::from(JsStr::latin1(b"H\xe9llo World"));
     assert_eq!(base_str.kind(), JsStringKind::Latin1Sequence);
 
-    let str1 = base_str.slice(0, 5);
-    let str2 = base_str.slice(6, base_str.len());
+    let str1 = base_str.slice(0..5);
+    let str2 = base_str.slice(6..base_str.len());
 
     assert_eq!(str1, JsString::from("Héllo"));
     assert_eq!(str2, JsString::from("World"));

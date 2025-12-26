@@ -67,7 +67,7 @@ impl<T: StringType> SequenceString<T> {
     /// Returns `Err(Some(Layout))` on allocation error.
     pub(crate) fn try_allocate(len: usize) -> Result<NonNull<Self>, Option<Layout>> {
         let (layout, offset) = Layout::array::<T::Byte>(len)
-            .and_then(|arr| T::base_layout().extend(arr))
+            .and_then(|arr| Layout::new::<Self>().extend(arr))
             .map(|(layout, offset)| (layout.pad_to_align(), offset))
             .map_err(|_| None)?;
 

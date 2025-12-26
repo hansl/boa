@@ -502,7 +502,7 @@ impl String {
             // 6. Return the substring of S from position to position + 1.
             IntegerOrInfinity::Integer(i) if i >= 0 && i < string.len() as i64 => {
                 let i = i as usize;
-                Ok(js_string!(string.get_expect(i..=i)).into())
+                Ok(js_string!(string.slice(i..=i)).into())
             }
             // 5. If position < 0 or position ≥ size, return the empty String.
             _ => Ok(js_string!().into()),
@@ -544,7 +544,7 @@ impl String {
         };
 
         // 8. Return the substring of S from k to k + 1.
-        Ok(js_string!(s.get_expect(k..=k)).into())
+        Ok(js_string!(s.slice(k..=k)).into())
     }
 
     /// `String.prototype.codePointAt( index )`
@@ -855,7 +855,7 @@ impl String {
             // 14. Return ! SameValueNonNumeric(substring, searchStr).
             // `SameValueNonNumeric` forwards to `==`, so directly check
             // equality to avoid converting to `JsValue`
-            Ok(JsValue::new(search_string == string.get_expect(start..end)))
+            Ok(JsValue::new(search_string == string.slice(start..end)))
         }
     }
 
@@ -918,7 +918,7 @@ impl String {
             // 14. Return ! SameValueNonNumeric(substring, searchStr).
             // `SameValueNonNumeric` forwards to `==`, so directly check
             // equality to avoid converting to `JsValue`
-            Ok(JsValue::new(search_str == string.get_expect(start..end)))
+            Ok(JsValue::new(search_str == string.slice(start..end)))
         } else {
             // 12. If start < 0, return false.
             Ok(false.into())
@@ -1043,7 +1043,7 @@ impl String {
         };
 
         // 10. Let preserved be the substring of string from 0 to position.
-        let preserved = JsString::from(string.get_expect(..position));
+        let preserved = JsString::from(string.slice(..position));
 
         let replacement = match replace_value {
             // 11. If functionalReplace is true, then
@@ -1080,7 +1080,7 @@ impl String {
         Ok(js_string!(
             &preserved,
             &replacement,
-            &JsString::from(string.get_expect(position + search_length..))
+            &JsString::from(string.slice(position + search_length..))
         )
         .into())
     }
@@ -1188,7 +1188,7 @@ impl String {
         // 14. For each element p of matchPositions, do
         for p in match_positions {
             // a. Let preserved be the substring of string from endOfLastMatch to p.
-            let preserved = string.get_expect(end_of_last_match..p);
+            let preserved = string.slice(end_of_last_match..p);
 
             // c. Else,
             let replacement = match replace {
@@ -1233,7 +1233,7 @@ impl String {
         // 15. If endOfLastMatch < the length of string, then
         if end_of_last_match < string.len() {
             // a. Set result to the string-concatenation of result and the substring of string from endOfLastMatch.
-            result.extend(string.get_expect(end_of_last_match..).iter());
+            result.extend(string.slice(end_of_last_match..).iter());
         }
 
         // 16. Return result.
@@ -1369,7 +1369,7 @@ impl String {
             // 11. For each non-negative integer i starting with start such that i ≤ len - searchLen, in descending order, do
             for i in (0..=min(start, end)).rev() {
                 // a. Let candidate be the substring of S from i to i + searchLen.
-                let candidate = string.get_expect(i..i + search_len);
+                let candidate = string.slice(i..i + search_len);
 
                 // b. If candidate is the same sequence of code units as searchStr, return 𝔽(i).
                 if candidate == search_str {
@@ -1985,7 +1985,7 @@ impl String {
         while let Some(index) = j {
             // a. Let T be the substring of S from i to j.
             // b. Append T as the last element of substrings.
-            substrings.push(this_str.slice(i, index));
+            substrings.push(this_str.slice(i..index));
 
             // c. If the number of elements of substrings is lim, return ! CreateArrayFromList(substrings).
             if substrings.len() == lim {
@@ -2004,7 +2004,7 @@ impl String {
 
         // 15. Let T be the substring of S from i.
         // 16. Append T to substrings.
-        substrings.push(this_str.slice(i, this_str.len()));
+        substrings.push(this_str.slice(i..));
 
         // 17. Return ! CreateArrayFromList(substrings).
         Ok(
@@ -2655,14 +2655,14 @@ pub(crate) fn get_substitution(
                 // $`
                 Some(CodePoint::Unicode('`')) => {
                     // The replacement is the substring of str from 0 to position.
-                    result.extend(str.get_expect(..position).iter());
+                    result.extend(str.slice(..position).iter());
                 }
                 // $'
                 Some(CodePoint::Unicode('\'')) => {
                     // If tailPos ≥ stringLength, the replacement is the empty String.
                     // Otherwise the replacement is the substring of str from tailPos.
                     if tail_pos < str_length {
-                        result.extend(str.get_expect(tail_pos..).iter());
+                        result.extend(str.slice(tail_pos..).iter());
                     }
                 }
                 // $nn

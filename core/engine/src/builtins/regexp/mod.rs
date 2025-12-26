@@ -1117,7 +1117,7 @@ impl RegExp {
         // 13.b. Let inputIndex be the index into input of the character that was obtained from element lastIndex of S.
         // 13.c. Let r be matcher(input, inputIndex).
         let r: Option<regress::Match> = match (full_unicode, input.as_str().variant()) {
-            (_, JsStrVariant::Ascii(s)) => matcher.find_from_ascii(s, last_index as usize).next(),
+            (_, JsStrVariant::Ascii(s)) => matcher.find_from_ascii(&s, last_index as usize).next(),
             (_, JsStrVariant::Latin1(_)) => {
                 // TODO: Currently regress does not support latin1 encoding.
                 let input = input.to_vec();
@@ -1217,7 +1217,7 @@ impl RegExp {
             .expect("this CreateDataPropertyOrThrow call must not fail");
 
         // 28. Let matchedSubstr be GetMatchString(S, match).
-        let matched_substr = input.get_expect((last_index as usize)..(e));
+        let matched_substr = input.slice((last_index as usize)..(e));
 
         // 29. Perform ! CreateDataPropertyOrThrow(A, "0", matchedSubstr).
         a.create_data_property_or_throw(0, matched_substr, context)
@@ -1247,7 +1247,7 @@ impl RegExp {
             for (name, range) in named_groups {
                 let name = js_string!(name);
                 if let Some(range) = range {
-                    let value = input.get_expect(range.clone());
+                    let value = input.slice(range.clone());
 
                     groups
                         .create_data_property_or_throw(name.clone(), value, context)
@@ -1308,7 +1308,7 @@ impl RegExp {
             // c. Else if fullUnicode is true, then
             // d. Else,
             let captured_value = capture.clone().map_or_else(JsValue::undefined, |range| {
-                js_string!(input.get_expect(range)).into()
+                js_string!(input.slice(range)).into()
             });
 
             // e. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(i)), capturedValue).
@@ -1773,7 +1773,7 @@ impl RegExp {
                 //    In such cases, the corresponding substitution is ignored.
 
                 // ii. Set accumulatedResult to the string-concatenation of accumulatedResult, the substring of S from nextSourcePosition to position, and replacement.
-                accumulated_result.extend(s.get_expect(next_source_position..position).iter());
+                accumulated_result.extend(s.slice(next_source_position..position).iter());
                 accumulated_result.extend(replacement.iter());
 
                 // iii. Set nextSourcePosition to position + matchLength.
@@ -1968,7 +1968,7 @@ impl RegExp {
                     q = advance_string_index(&arg_str, q, unicode);
                 } else {
                     // 1. Let T be the substring of S from p to q.
-                    let arg_str_substring = arg_str.get_expect(p as usize..q as usize);
+                    let arg_str_substring = arg_str.slice(p as usize..q as usize);
 
                     // 2. Perform ! CreateDataPropertyOrThrow(A, ! ToString(𝔽(lengthA)), T).
                     a.create_data_property_or_throw(length_a, arg_str_substring, context)

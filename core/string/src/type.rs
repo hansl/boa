@@ -1,11 +1,9 @@
 //! Module containing string types public and crate-specific.
 use crate::vtable::SequenceString;
 use crate::{JsStr, JsStringKind};
-use std::alloc::Layout;
 
 pub(crate) mod sealed {
     use crate::{JsStr, JsStringKind};
-    use std::alloc::Layout;
 
     /// Seal to prevent others from implementing their own string types.
     pub trait Sealed {}
@@ -22,9 +20,6 @@ pub(crate) mod sealed {
 
         /// The type of one character for this string type.
         type Byte: Copy + Eq + 'static;
-
-        /// Create the base layout for the sequence string header.
-        fn base_layout() -> Layout;
 
         /// Construct a [`JsStr`] from a slice of characters.
         fn str_ctor(slice: &[Self::Byte]) -> JsStr<'_>;
@@ -52,14 +47,13 @@ impl InternalStringType for Ascii {
     const KIND: JsStringKind = JsStringKind::AsciiSequence;
     type Byte = u8;
 
-    fn base_layout() -> Layout {
-        Layout::new::<SequenceString<Ascii>>()
-    }
-
+    #[inline]
     fn str_ctor(slice: &[Self::Byte]) -> JsStr<'_> {
         // SAFETY: This is valid UTF8 since it is ASCII.
-        let str = unsafe { str::from_utf8_unchecked(slice) };
-        JsStr::ascii(str)
+        unsafe {
+            let str = str::from_utf8_unchecked(slice);
+            JsStr::ascii_unchecked(str)
+        }
     }
 }
 
@@ -80,10 +74,7 @@ impl InternalStringType for Latin1 {
     const KIND: JsStringKind = JsStringKind::Latin1Sequence;
     type Byte = u8;
 
-    fn base_layout() -> Layout {
-        Layout::new::<SequenceString<Self>>()
-    }
-
+    #[inline]
     fn str_ctor(slice: &[Self::Byte]) -> JsStr<'_> {
         JsStr::latin1(slice)
     }
@@ -105,10 +96,6 @@ impl InternalStringType for Utf16 {
     const DATA_OFFSET: usize = size_of::<SequenceString<Self>>();
     const KIND: JsStringKind = JsStringKind::Utf16Sequence;
     type Byte = u16;
-
-    fn base_layout() -> Layout {
-        Layout::new::<SequenceString<Self>>()
-    }
 
     fn str_ctor(slice: &[Self::Byte]) -> JsStr<'_> {
         JsStr::utf16(slice)

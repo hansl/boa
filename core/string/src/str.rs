@@ -1,9 +1,8 @@
 use super::iter::{CodePointsIter, Windows};
-use crate::{CodePoint, Iter, TaggedLen, display::JsStrDisplayLossy, is_trimmable_whitespace};
-use std::ptr::NonNull;
+use crate::{CodePoint, Iter, display::JsStrDisplayLossy, is_trimmable_whitespace};
 use std::{
     hash::{Hash, Hasher},
-    marker::PhantomData,
+    slice,
     slice::SliceIndex,
 };
 
@@ -17,18 +16,11 @@ pub enum JsStrVariant<'a> {
     Utf16(&'a [u16]),
 }
 
-#[derive(Clone, Copy)]
-struct Inner<'a> {
-    tagged_len: TaggedLen,
-    ptr: *const u8,
-    _marker: PhantomData<&'a [u8]>,
-}
-
 /// This is equivalent to Rust's `&str`.
 #[derive(Clone, Copy)]
 #[repr(align(8))]
 pub struct JsStr<'a> {
-    inner: Inner<'a>,
+    inner: JsStrVariant<'a>,
 }
 
 // SAFETY: Inner<'_> has only immutable references to Sync types (u8/u16), so this is safe.
@@ -47,11 +39,7 @@ impl<'a> JsStr<'a> {
     #[must_use]
     pub const fn latin1(value: &'a [u8]) -> Self {
         Self {
-            inner: Inner {
-                tagged_len: TaggedLen::new(value.len(), true),
-                ptr: value.as_ptr(),
-                _marker: PhantomData,
-            },
+            inner: JsStrVariant::Latin1(value),
         }
     }
 
@@ -60,11 +48,7 @@ impl<'a> JsStr<'a> {
     #[must_use]
     pub const fn utf16(value: &'a [u16]) -> Self {
         Self {
-            inner: Inner {
-                tagged_len: TaggedLen::new(value.len(), false),
-                ptr: value.as_ptr().cast::<u8>(),
-                _marker: PhantomData,
-            },
+            inner: JsStrVariant::Utf16(value),
         }
     }
 
@@ -72,60 +56,44 @@ impl<'a> JsStr<'a> {
     #[inline]
     #[must_use]
     pub const fn len(&self) -> usize {
-        self.inner.tagged_len.len()
+        match self.inner {
+            JsStrVariant::Latin1(a) => a.len(),
+            JsStrVariant::Utf16(a) => a.len(),
+        }
+    }
+
+    /// Return a JsStr<'a> of the slice passed in.
+    #[inline]
+    #[must_use]
+    pub fn slice(self, start: usize, end: usize) -> JsStr<'a> {
+        match self.inner {
+            JsStrVariant::Latin1(a) => Self::latin1(&a[start..end]),
+            JsStrVariant::Utf16(a) => Self::utf16(&a[start..end]),
+        }
     }
 
     /// Return the inner [`JsStrVariant`] variant of the [`JsStr`].
     #[inline]
     #[must_use]
     pub const fn variant(self) -> JsStrVariant<'a> {
-        let len = self.inner.tagged_len.len();
-
-        if self.inner.tagged_len.is_latin1() {
-            // SAFETY: We check that the ptr points to a latin1 (i.e. &[u8]), so this is safe.
-            let slice = unsafe { std::slice::from_raw_parts(self.inner.ptr, len) };
-
-            JsStrVariant::Latin1(slice)
-        } else {
-            // SAFETY: Non-latin1 ptr always points to a valid &[u16] slice, so this is safe.
-            #[allow(clippy::cast_ptr_alignment)]
-            let ptr = self.inner.ptr.cast::<u16>();
-
-            // SAFETY: We check that the ptr points to an utf16 slice, so this is safe.
-            let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
-
-            JsStrVariant::Utf16(slice)
-        }
-    }
-
-    /// Returns a pointer to the start of the data.
-    #[inline]
-    #[must_use]
-    pub(crate) const fn as_ptr(&self) -> NonNull<u8> {
-        // SAFETY: If this object is created, this should never be null.
-        unsafe { NonNull::new_unchecked(self.inner.ptr.cast_mut()) }
+        self.inner
     }
 
     /// Check if the [`JsStr`] is latin1 encoded.
     #[inline]
     #[must_use]
     pub const fn is_latin1(&self) -> bool {
-        self.inner.tagged_len.is_latin1()
+        matches!(self.inner, JsStrVariant::Latin1(_))
     }
 
     /// Returns [`u8`] slice if the [`JsStr`] is latin1 encoded, otherwise [`None`].
     #[inline]
     #[must_use]
     pub const fn as_latin1(&self) -> Option<&[u8]> {
-        if self.is_latin1() {
-            let len = self.inner.tagged_len.len();
-
-            // SAFETY: ptr is always a valid pointer to a slice data.
-            let slice = unsafe { std::slice::from_raw_parts(self.inner.ptr, len) };
-            return Some(slice);
+        match self.inner {
+            JsStrVariant::Latin1(v) => Some(v),
+            JsStrVariant::Utf16(_) => None,
         }
-
-        None
     }
 
     /// Iterate over the codepoints of the string.
@@ -186,6 +154,24 @@ impl<'a> JsStr<'a> {
     {
         // Safety: Caller must ensure the index is not out of bounds
         unsafe { JsSliceIndex::get_unchecked(self, index) }
+    }
+
+    /// Returns a
+    ///
+    /// SAFETY: Make sure this string will live for as long as the returned `JsStr`.
+    #[inline]
+    #[must_use]
+    pub(super) unsafe fn as_static(&self) -> JsStr<'static> {
+        match self.inner {
+            JsStrVariant::Latin1(a) => {
+                // SAFETY: contract of outer function.
+                JsStr::latin1(unsafe { slice::from_raw_parts(a.as_ptr(), a.len()) })
+            }
+            JsStrVariant::Utf16(a) => {
+                // SAFETY: contract of outer function.
+                JsStr::utf16(unsafe { slice::from_raw_parts(a.as_ptr(), a.len()) })
+            }
+        }
     }
 
     /// Convert the [`JsStr`] into a [`Vec<U16>`].

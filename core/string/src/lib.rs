@@ -982,17 +982,7 @@ impl PartialEq for JsString {
         if self.len() != other.len() {
             return false;
         }
-
-        match (self.variant(), other.variant()) {
-            (JsStrVariant::Latin1(s), JsStrVariant::Latin1(o)) => s == o,
-            (JsStrVariant::Utf16(s), JsStrVariant::Utf16(o)) => s == o,
-            (JsStrVariant::Latin1(s), JsStrVariant::Utf16(o)) => {
-                s.iter().zip(o.iter()).all(|(a, b)| u16::from(*a) == *b)
-            }
-            (JsStrVariant::Utf16(s), JsStrVariant::Latin1(o)) => {
-                s.iter().zip(o.iter()).all(|(a, b)| *a == u16::from(*b))
-            }
-        }
+        self.iter().zip(other.iter()).all(|(a, b)| a == b)
     }
 }
 
@@ -1002,12 +992,7 @@ impl PartialEq<JsString> for [u16] {
         if self.len() != other.len() {
             return false;
         }
-        for (x, y) in self.iter().copied().zip(other.iter()) {
-            if x != y {
-                return false;
-            }
-        }
-        true
+        self.iter().copied().zip(other.iter()).all(|(a, b)| a == b)
     }
 }
 
@@ -1035,7 +1020,9 @@ impl<const N: usize> PartialEq<[u16; N]> for JsString {
 impl PartialEq<str> for JsString {
     #[inline]
     fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
+        self.iter()
+            .zip(other.as_bytes())
+            .all(|(a, b)| a == u16::from(*b))
     }
 }
 
@@ -1047,20 +1034,6 @@ impl PartialEq<&str> for JsString {
 }
 
 impl PartialEq<JsString> for str {
-    #[inline]
-    fn eq(&self, other: &JsString) -> bool {
-        other == self
-    }
-}
-
-impl PartialEq<JsStr<'_>> for JsString {
-    #[inline]
-    fn eq(&self, other: &JsStr<'_>) -> bool {
-        self.as_str() == *other
-    }
-}
-
-impl PartialEq<JsString> for JsStr<'_> {
     #[inline]
     fn eq(&self, other: &JsString) -> bool {
         other == self

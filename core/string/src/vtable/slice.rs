@@ -90,6 +90,11 @@ fn slice_code_points(vtable: NonNull<JsStringVTable>) -> CodePointsIter<'static>
     CodePointsIter::new(slice_as_str(vtable))
 }
 
+#[inline]
+fn slice_code_points(vtable: NonNull<JsStringVTable>) -> CodePointsIter<'static> {
+    CodePointsIter::new(slice_as_str(vtable))
+}
+
 /// `VTable` function for refcount, need to return an `Option<usize>`.
 #[inline]
 #[allow(clippy::unnecessary_wraps)]

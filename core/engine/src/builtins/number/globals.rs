@@ -7,7 +7,6 @@ use crate::{
     string::StaticJsStrings,
 };
 
-use boa_macros::js_str;
 use boa_string::JsStrVariant;
 
 /// Builtin javascript 'isFinite(number)' function.
@@ -175,7 +174,7 @@ pub(crate) fn parse_int(_: &JsValue, args: &[JsValue], context: &mut Context) ->
     // 3. Let sign be 1.
     // 4. If S is not empty and the first code unit of S is the code unit 0x002D (HYPHEN-MINUS),
     //    set sign to -1.
-    let sign = if !s.is_empty() && s.starts_with(js_str!("-")) {
+    let sign = if !s.is_empty() && s.starts_with_str("-") {
         -1
     } else {
         1
@@ -183,7 +182,7 @@ pub(crate) fn parse_int(_: &JsValue, args: &[JsValue], context: &mut Context) ->
 
     // 5. If S is not empty and the first code unit of S is the code unit 0x002B (PLUS SIGN) or
     //    the code unit 0x002D (HYPHEN-MINUS), remove the first code unit from S.
-    if !s.is_empty() && (s.starts_with(js_str!("+")) || s.starts_with(js_str!("-"))) {
+    if !s.is_empty() && (s.starts_with_str("+") || s.starts_with_str("-")) {
         s = s.get(1..).expect("already checked that it's not empty");
     }
 
@@ -216,10 +215,7 @@ pub(crate) fn parse_int(_: &JsValue, args: &[JsValue], context: &mut Context) ->
     //     a. If the length of S is at least 2 and the first two code units of S are either "0x" or "0X", then
     //         i. Remove the first two code units from S.
     //         ii. Set R to 16.
-    if strip_prefix
-        && s.len() >= 2
-        && (s.starts_with(js_str!("0x")) || s.starts_with(js_str!("0X")))
-    {
+    if strip_prefix && s.len() >= 2 && (s.starts_with_str("0x") || s.starts_with_str("0X")) {
         s = s
             .get(2..)
             .expect("already checked that it contains at least two chars");
@@ -347,7 +343,7 @@ pub(crate) fn parse_float(
         _ => (true, trimmed_string.clone()),
     };
 
-    if prefix.starts_with(js_str!("Infinity")) {
+    if prefix.starts_with_str("Infinity") {
         if positive {
             return Ok(JsValue::positive_infinity());
         }

@@ -200,7 +200,10 @@ impl JsString {
     /// [`FromUtf16Error`][std::string::FromUtf16Error] if it contains any invalid data.
     #[inline]
     pub fn to_std_string(&self) -> Result<String, std::string::FromUtf16Error> {
-        self.as_str().to_std_string()
+        match self.variant() {
+            JsStrVariant::Latin1(v) => Ok(v.iter().copied().map(char::from).collect()),
+            JsStrVariant::Utf16(v) => String::from_utf16(v),
+        }
     }
 
     /// Decodes a [`JsString`] into an iterator of [`Result<String, u16>`], returning surrogates as
@@ -317,7 +320,69 @@ impl JsString {
     #[inline]
     #[must_use]
     pub fn to_number(&self) -> f64 {
-        self.as_str().to_number()
+        // 1. Let text be ! StringToCodePoints(str).
+        // 2. Let literal be ParseText(text, StringNumericLiteral).
+        let Ok(string) = self.to_std_string() else {
+            // 3. If literal is a List of errors, return NaN.
+            return f64::NAN;
+        };
+
+        // 4. Return StringNumericValue of literal.
+        let string = string.trim_matches(is_trimmable_whitespace);
+        match string {
+            "" => return 0.0,
+            "-Infinity" => return f64::NEG_INFINITY,
+            "Infinity" | "+Infinity" => return f64::INFINITY,
+            _ => {}
+        }
+
+        let mut s = string.bytes();
+        let base = match (s.next(), s.next()) {
+            (Some(b'0'), Some(b'b' | b'B')) => Some(2),
+            (Some(b'0'), Some(b'o' | b'O')) => Some(8),
+            (Some(b'0'), Some(b'x' | b'X')) => Some(16),
+            // Make sure that no further variants of "infinity" are parsed.
+            (Some(b'i' | b'I'), _) => {
+                return f64::NAN;
+            }
+            _ => None,
+        };
+
+        // Parse numbers that begin with `0b`, `0o` and `0x`.
+        if let Some(base) = base {
+            let string = &string[2..];
+            if string.is_empty() {
+                return f64::NAN;
+            }
+
+            // Fast path
+            if let Ok(value) = u32::from_str_radix(string, base) {
+                return f64::from(value);
+            }
+
+            // Slow path
+            let mut value: f64 = 0.0;
+            let base_float = f64::from(base);
+            for c in s {
+                let digit = match c {
+                    b'0' => 0,
+                    b'1' => 1,
+                    b'2' => 2,
+                    b'3' => 3,
+                    b'4' => 4,
+                    b'5' => 5,
+                    b'6' => 6,
+                    b'7' => 7,
+                    b'8' => 8,
+                    b'9' => 9,
+                    _ => return f64::NAN,
+                };
+                value = value.mul_add(base_float, f64::from(digit));
+            }
+            return value;
+        }
+
+        fast_float2::parse(string).unwrap_or(f64::NAN)
     }
 
     /// Get the length of the [`JsString`].
@@ -422,22 +487,30 @@ impl JsString {
         unsafe { Self::slice_unchecked(self, 0, end + 1) }
     }
 
-    /// Returns true if needle is a prefix of the [`JsStr`].
+    /// Returns true if needle is a prefix of this string, `str` slice variant.
     #[inline]
     #[must_use]
-    // We check the size, so this should never panic.
-    #[allow(clippy::missing_panics_doc)]
-    pub fn starts_with(&self, needle: JsStr<'_>) -> bool {
-        self.as_str().starts_with(needle)
+    pub fn starts_with_str(&self, needle: &str) -> bool {
+        self.slice(0, needle.len()).eq(needle)
     }
 
-    /// Returns `true` if `needle` is a suffix of the [`JsStr`].
+    /// Returns true if needle is a prefix of this string.
     #[inline]
     #[must_use]
-    // We check the size, so this should never panic.
-    #[allow(clippy::missing_panics_doc)]
-    pub fn ends_with(&self, needle: JsStr<'_>) -> bool {
-        self.as_str().starts_with(needle)
+    pub fn starts_with(&self, needle: &JsString) -> bool {
+        self.slice(0, needle.len()).eq(needle)
+    }
+
+    /// Returns `true` if `needle` is a suffix of this string.
+    #[inline]
+    #[must_use]
+    pub fn ends_with(&self, needle: &JsString) -> bool {
+        if let Some(start) = self.len().checked_sub(needle.len()) {
+            // SAFETY: checked the length above.
+            unsafe { Self::slice_unchecked(self, start, self.len()).eq(needle) }
+        } else {
+            false
+        }
     }
 
     /// Get the `u16` code unit at index. This does not parse any characters if there
@@ -906,7 +979,20 @@ impl Ord for JsString {
 impl PartialEq for JsString {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        self.as_str() == other.as_str()
+        if self.len() != other.len() {
+            return false;
+        }
+
+        match (self.variant(), other.variant()) {
+            (JsStrVariant::Latin1(s), JsStrVariant::Latin1(o)) => s == o,
+            (JsStrVariant::Utf16(s), JsStrVariant::Utf16(o)) => s == o,
+            (JsStrVariant::Latin1(s), JsStrVariant::Utf16(o)) => {
+                s.iter().zip(o.iter()).all(|(a, b)| u16::from(*a) == *b)
+            }
+            (JsStrVariant::Utf16(s), JsStrVariant::Latin1(o)) => {
+                s.iter().zip(o.iter()).all(|(a, b)| *a == u16::from(*b))
+            }
+        }
     }
 }
 

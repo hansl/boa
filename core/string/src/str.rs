@@ -62,10 +62,11 @@ impl<'a> JsStr<'a> {
         }
     }
 
-    /// Return a JsStr<'a> of the slice passed in.
+    /// Return a `JsStr<'a>` of the slice passed in. This is limited to the crate only
+    /// as external users should use [`JsString::slice`] instead.
     #[inline]
     #[must_use]
-    pub fn slice(self, start: usize, end: usize) -> JsStr<'a> {
+    pub(crate) fn slice(self, start: usize, end: usize) -> JsStr<'a> {
         match self.inner {
             JsStrVariant::Latin1(a) => Self::latin1(&a[start..end]),
             JsStrVariant::Utf16(a) => Self::utf16(&a[start..end]),

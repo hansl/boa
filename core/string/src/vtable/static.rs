@@ -10,7 +10,8 @@ use std::ptr::NonNull;
 pub struct StaticString {
     /// Embedded `VTable` - must be the first field for vtable dispatch.
     vtable: JsStringVTable,
-    /// The actual string data.
+    /// The actual string data. This is public as the `find_static_js_string` function
+    /// requires access to it to find the [`JsString`] in const time.
     pub(crate) str: JsStr<'static>,
 }
 

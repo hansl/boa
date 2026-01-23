@@ -20,7 +20,6 @@ use boa_ast::{
 };
 use boa_gc::{Finalize, Gc, GcRefCell, Trace};
 use boa_interner::Interner;
-use boa_macros::js_str;
 use dynify::Dynify;
 use indexmap::IndexSet;
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};

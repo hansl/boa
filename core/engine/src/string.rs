@@ -61,11 +61,8 @@ macro_rules! js_string {
     ($s:expr) => {
         $crate::string::JsString::from($s)
     };
-    ( $x:expr, $y:expr ) => {
-        $crate::string::JsString::concat($crate::string::JsStr::from($x), $crate::string::JsStr::from($y))
-    };
     ( $( $s:expr ),+ ) => {
-        $crate::string::JsString::concat_array(&[ $( $crate::string::JsStr::from($s) ),+ ])
+        $crate::string::JsString::concat_array(&[ $( js_string!($s) ),+ ])
     };
 }
 

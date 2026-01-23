@@ -704,7 +704,7 @@ impl JsString {
     /// Creates a new [`JsString`] from the concatenation of `x` and `y`.
     #[inline]
     #[must_use]
-    pub fn concat(x: JsStr<'_>, y: JsStr<'_>) -> Self {
+    pub fn concat(x: JsString, y: JsString) -> Self {
         Self::concat_array(&[x, y])
     }
 
@@ -712,7 +712,7 @@ impl JsString {
     /// `strings`.
     #[inline]
     #[must_use]
-    pub fn concat_array(strings: &[JsStr<'_>]) -> Self {
+    pub fn concat_array(strings: &[JsString]) -> Self {
         let mut latin1_encoding = true;
         let mut full_count = 0usize;
         for string in strings {
@@ -920,14 +920,14 @@ impl From<JsStr<'_>> for JsString {
 impl From<&[JsString]> for JsString {
     #[inline]
     fn from(value: &[JsString]) -> Self {
-        Self::concat_array(&value.iter().map(Self::as_str).collect::<Vec<_>>()[..])
+        Self::concat_array(&value)
     }
 }
 
 impl<const N: usize> From<&[JsString; N]> for JsString {
     #[inline]
     fn from(value: &[JsString; N]) -> Self {
-        Self::concat_array(&value.iter().map(Self::as_str).collect::<Vec<_>>()[..])
+        Self::concat_array(&value[..])
     }
 }
 

@@ -1,6 +1,6 @@
 //! Display implementations for [`JsString`].
 
-use crate::{CodePoint, JsStr, JsStrVariant, JsString, JsStringKind, SliceString};
+use crate::{CodePoint, JsStrVariant, JsString, JsStringKind, SliceString};
 use std::cell::RefCell;
 use std::fmt;
 use std::fmt::Write;
@@ -8,11 +8,11 @@ use std::fmt::Write;
 /// `Display` implementation for [`JsString`] that escapes unicode characters.
 // This should not implement debug, only be shown as a standard display.
 #[allow(missing_debug_implementations)]
-pub struct JsStrDisplayEscaped<'a> {
+pub struct DisplayEscaped<'a> {
     inner: &'a JsString,
 }
 
-impl fmt::Display for JsStrDisplayEscaped<'_> {
+impl fmt::Display for DisplayEscaped<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.inner.variant() {
             // SAFETY: `JsStrVariant::Latin1` does not contain any unpaired surrogates, so need to check.
@@ -31,7 +31,7 @@ impl fmt::Display for JsStrDisplayEscaped<'_> {
     }
 }
 
-impl<'a> From<&'a JsString> for JsStrDisplayEscaped<'a> {
+impl<'a> From<&'a JsString> for DisplayEscaped<'a> {
     fn from(inner: &'a JsString) -> Self {
         Self { inner }
     }
@@ -40,21 +40,21 @@ impl<'a> From<&'a JsString> for JsStrDisplayEscaped<'a> {
 /// `Display` implementation for [`JsString`] that escapes unicode characters.
 // This should not implement debug, only be shown as a standard display.
 #[allow(missing_debug_implementations)]
-pub struct JsStrDisplayLossy<'a> {
-    inner: JsStr<'a>,
+pub struct DisplayLossy<'a> {
+    inner: &'a JsString,
 }
 
-impl fmt::Display for JsStrDisplayLossy<'_> {
+impl fmt::Display for DisplayLossy<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // No need to optimize latin1.
-        self.inner
-            .code_points_lossy()
+        char::decode_utf16(self.inner.iter())
+            .map(|res| res.unwrap_or('\u{FFFD}'))
             .try_for_each(|c| f.write_char(c))
     }
 }
 
-impl<'a> From<JsStr<'a>> for JsStrDisplayLossy<'a> {
-    fn from(inner: JsStr<'a>) -> Self {
+impl<'a> From<&'a JsString> for DisplayLossy<'a> {
+    fn from(inner: &'a JsString) -> Self {
         Self { inner }
     }
 }
@@ -121,10 +121,10 @@ fn latin1() {
     // 0xE9 is `é` in ISO-8859-1 (see https://www.ascii-code.com/ISO-8859-1).
     let s = JsString::from("Hello \u{E9} world!");
 
-    let rust_str = format!("{}", JsStrDisplayEscaped { inner: &s });
+    let rust_str = format!("{}", DisplayEscaped { inner: &s });
     assert_eq!(rust_str, "Hello é world!");
 
-    let rust_str = format!("{}", JsStrDisplayLossy { inner: s.as_str() });
+    let rust_str = format!("{}", DisplayLossy { inner: &s });
     assert_eq!(rust_str, "Hello é world!");
 }
 
@@ -133,10 +133,10 @@ fn emoji() {
     // 0x1F600 is `😀` (see https://www.fileformat.info/info/unicode/char/1f600/index.htm).
     let s = JsString::from(&[0xD83D, 0xDE00]);
 
-    let rust_str = format!("{}", JsStrDisplayEscaped { inner: &s });
+    let rust_str = format!("{}", DisplayEscaped { inner: &s });
     assert_eq!(rust_str, "😀");
 
-    let rust_str = format!("{}", JsStrDisplayLossy { inner: s.as_str() });
+    let rust_str = format!("{}", DisplayLossy { inner: &s });
     assert_eq!(rust_str, "😀");
 }
 
@@ -145,9 +145,9 @@ fn unpaired_surrogates() {
     // 0xD800 is an unpaired surrogate (see https://www.fileformat.info/info/unicode/char/d800/index.htm).
     let s = JsString::from(&[0xD800]);
 
-    let rust_str = format!("{}", JsStrDisplayEscaped { inner: &s });
+    let rust_str = format!("{}", DisplayEscaped { inner: &s });
     assert_eq!(rust_str, "\\uD800");
 
-    let rust_str = format!("{}", JsStrDisplayLossy { inner: s.as_str() });
+    let rust_str = format!("{}", DisplayLossy { inner: &s });
     assert_eq!(rust_str, "�");
 }

@@ -16,7 +16,6 @@ use crate::{
     property::{PropertyDescriptor, PropertyKey},
 };
 use boa_gc::{Finalize, Trace};
-use boa_macros::js_str;
 
 use super::{TypedArrayKind, is_valid_integer_index};
 
@@ -265,7 +264,7 @@ impl TypedArray {
 /// [spec]: https://tc39.es/ecma262/#sec-canonicalnumericindexstring
 fn canonical_numeric_index_string(argument: &JsString) -> Option<f64> {
     // 1. If argument is "-0", return -0𝔽.
-    if argument == &js_str!("-0") {
+    if argument == "-0" {
         return Some(-0.0);
     }
 

@@ -23,7 +23,7 @@ impl CodeBlock {
     #[allow(clippy::match_same_arms)]
     pub fn to_graph(&self, graph: &mut SubGraph) {
         // Have to remove any invalid graph chars like `<` or `>`.
-        let name = if self.name() == &js_str!("<main>") {
+        let name = if self.name() == "<main>" {
             "__main__".to_string()
         } else {
             self.name().to_std_string_escaped()

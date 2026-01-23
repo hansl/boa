@@ -25,7 +25,7 @@ mod vtable;
 mod tests;
 
 use self::iter::Windows;
-use crate::display::{JsStrDisplayEscaped, JsStrDisplayLossy, JsStringDebugInfo};
+use crate::display::{DisplayEscaped, DisplayLossy, JsStringDebugInfo};
 use crate::iter::CodePointsIter;
 use crate::r#type::{Latin1, Utf16};
 pub use crate::vtable::StaticString;
@@ -549,16 +549,16 @@ impl JsString {
     /// displaying.
     #[inline]
     #[must_use]
-    pub fn display_escaped(&self) -> JsStrDisplayEscaped<'_> {
-        JsStrDisplayEscaped::from(self)
+    pub fn display_escaped(&self) -> DisplayEscaped<'_> {
+        DisplayEscaped::from(self)
     }
 
     /// Gets a displayable lossy string. This may be faster and has fewer
     /// allocations than `format!("{}", str.to_string_lossy())` when displaying.
     #[inline]
     #[must_use]
-    pub fn display_lossy(&self) -> JsStrDisplayLossy<'_> {
-        self.as_str().display_lossy()
+    pub fn display_lossy(&self) -> DisplayLossy<'_> {
+        DisplayLossy::from(self)
     }
 
     /// Get a debug displayable info and metadata for this string.

@@ -1,5 +1,5 @@
 use super::iter::{CodePointsIter, Windows};
-use crate::{CodePoint, Iter, display::JsStrDisplayLossy};
+use crate::{CodePoint, Iter};
 use std::{
     hash::{Hash, Hasher},
     slice,
@@ -323,24 +323,6 @@ impl<'a> JsStr<'a> {
     #[inline]
     pub fn code_points_lossy(self) -> impl Iterator<Item = char> + 'a {
         char::decode_utf16(self.iter()).map(|res| res.unwrap_or('\u{FFFD}'))
-    }
-
-    /// Decodes a [`JsStr`] into a [`String`], replacing invalid data with the
-    /// replacement character U+FFFD.
-    #[inline]
-    #[must_use]
-    pub fn to_std_string_lossy(&self) -> String {
-        self.display_lossy().to_string()
-    }
-
-    /// Gets a displayable lossy string.
-    ///
-    /// This may be faster and has fewer
-    /// allocations than `format!("{}", str.to_string_lossy())` when displaying.
-    #[inline]
-    #[must_use]
-    pub fn display_lossy(&self) -> JsStrDisplayLossy<'a> {
-        JsStrDisplayLossy::from(*self)
     }
 }
 

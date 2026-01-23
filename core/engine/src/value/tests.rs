@@ -708,7 +708,7 @@ fn to_string() {
         assert_eq!(&JsValue::new(55.0).to_string(ctx).unwrap(), "55");
         assert_eq!(
             JsValue::new(js_str!("hello")).to_string(ctx).unwrap(),
-            js_str!("hello")
+            js_string!("hello")
         );
     })]);
 }

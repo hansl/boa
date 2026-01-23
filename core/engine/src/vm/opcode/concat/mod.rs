@@ -21,7 +21,7 @@ impl ConcatToString {
             let val = context.vm.get_register(value.into()).clone();
             strings.push(val.to_string(context)?);
         }
-        let s = JsString::concat_array(&strings.iter().map(JsString::as_str).collect::<Vec<_>>());
+        let s = JsString::concat_array(strings.iter().cloned().collect::<Vec<_>>().as_slice());
         context.vm.set_register(string.into(), s.into());
         Ok(())
     }

@@ -705,10 +705,10 @@ impl String {
                 let n = n as usize;
                 let mut result = Vec::with_capacity(n);
 
-                std::iter::repeat_n(string.as_str(), n).for_each(|s| result.push(s));
+                std::iter::repeat_n(string, n).for_each(|s| result.push(s.clone()));
 
                 // 6. Return the String value that is made from n copies of S appended together.
-                Ok(JsString::concat_array(&result).into())
+                Ok(JsString::concat_array(result.as_slice()).into())
             }
             // 5. If n is 0, return the empty String.
             IntegerOrInfinity::Integer(0) => Ok(js_string!().into()),

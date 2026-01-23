@@ -3,6 +3,9 @@ use crate::iter::CodePointsIter;
 use crate::{JsStr, JsString, JsStringKind};
 use std::ptr::NonNull;
 
+mod concat;
+pub(crate) use concat::ConcatString;
+
 mod sequence;
 pub(crate) use sequence::SequenceString;
 

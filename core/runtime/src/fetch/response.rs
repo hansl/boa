@@ -9,8 +9,7 @@ use crate::fetch::headers::JsHeaders;
 use boa_engine::object::builtins::{JsPromise, JsUint8Array};
 use boa_engine::value::{TryFromJs, TryIntoJs};
 use boa_engine::{
-    Context, JsData, JsNativeError, JsResult, JsString, JsValue, boa_class, js_error, js_str,
-    js_string,
+    Context, JsData, JsNativeError, JsResult, JsString, JsValue, boa_class, js_error, js_string,
 };
 use boa_gc::{Finalize, Trace};
 use http::StatusCode;
@@ -67,15 +66,15 @@ impl ResponseType {
 impl TryFromJs for ResponseType {
     fn try_from_js(value: &JsValue, context: &mut Context) -> JsResult<Self> {
         let value_str = value.to_string(context)?;
-        if value_str == js_str!("basic") {
+        if value_str == "basic" {
             Ok(ResponseType::Basic)
-        } else if value_str == js_str!("cors") {
+        } else if value_str == "cors" {
             Ok(ResponseType::Cors)
-        } else if value_str == js_str!("error") {
+        } else if value_str == "error" {
             Ok(ResponseType::Error)
-        } else if value_str == js_str!("opaque") {
+        } else if value_str == "opaque" {
             Ok(ResponseType::Opaque)
-        } else if value_str == js_str!("opaqueredirect") {
+        } else if value_str == "opaqueredirect" {
             Ok(ResponseType::OpaqueRedirect)
         } else {
             Err(js_error!(TypeError: "Invalid response type value"))

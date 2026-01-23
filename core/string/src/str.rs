@@ -194,6 +194,7 @@ impl<'a> JsStr<'a> {
         let n = needle.len();
         self.len() >= n && needle == self.get(..n).expect("already checked size")
     }
+
     /// Returns `true` if `needle` is a suffix of the [`JsStr`].
     #[inline]
     #[must_use]

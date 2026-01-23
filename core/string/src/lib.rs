@@ -29,7 +29,7 @@ use crate::display::{DisplayEscaped, DisplayLossy, JsStringDebugInfo};
 use crate::iter::CodePointsIter;
 use crate::r#type::{Latin1, Utf16};
 pub use crate::vtable::StaticString;
-use crate::vtable::{SequenceString, SliceString};
+use crate::vtable::{ConcatString, SequenceString, SliceString};
 #[doc(inline)]
 pub use crate::{
     builder::{CommonJsStringBuilder, Latin1JsStringBuilder, Utf16JsStringBuilder},
@@ -114,6 +114,9 @@ pub(crate) enum JsStringKind {
 
     /// A static string that is valid for `'static` lifetime.
     Static = 3,
+
+    /// A string that is the concatenation of other strings.
+    Concat = 4,
 }
 
 /// A Latin1 or UTF-16–encoded, reference counted, immutable string.
@@ -713,75 +716,12 @@ impl JsString {
     #[inline]
     #[must_use]
     pub fn concat_array(strings: &[JsString]) -> Self {
-        let mut latin1_encoding = true;
-        let mut full_count = 0usize;
-        for string in strings {
-            let Some(sum) = full_count.checked_add(string.len()) else {
-                alloc_overflow()
-            };
-            if !string.is_latin1() {
-                latin1_encoding = false;
-            }
-            full_count = sum;
+        let mut s = ConcatString::allocate(strings);
+        // SAFETY: Just constructed.
+        unsafe {
+            s.as_mut().populate(strings);
         }
-
-        let (ptr, data_offset) = if latin1_encoding {
-            let p = SequenceString::<Latin1>::allocate(full_count);
-            (p.cast::<u8>(), size_of::<SequenceString<Latin1>>())
-        } else {
-            let p = SequenceString::<Utf16>::allocate(full_count);
-            (p.cast::<u8>(), size_of::<SequenceString<Utf16>>())
-        };
-
-        let string = {
-            // SAFETY: `allocate_*_seq` guarantees that `ptr` is a valid pointer to a sequence string.
-            let mut data = unsafe {
-                let seq_ptr = ptr.as_ptr();
-                seq_ptr.add(data_offset)
-            };
-            for &string in strings {
-                // SAFETY:
-                // The sum of all `count` for each `string` equals `full_count`, and since we're
-                // iteratively writing each of them to `data`, `copy_non_overlapping` always stays
-                // in-bounds for `count` reads of each string and `full_count` writes to `data`.
-                //
-                // Each `string` must be properly aligned to be a valid slice, and `data` must be
-                // properly aligned by `allocate_seq`.
-                //
-                // `allocate_seq` must return a valid pointer to newly allocated memory, meaning
-                // `ptr` and all `string`s should never overlap.
-                unsafe {
-                    // NOTE: The alignment is checked when we allocate the array.
-                    #[allow(clippy::cast_ptr_alignment)]
-                    match (latin1_encoding, string.variant()) {
-                        (true, JsStrVariant::Latin1(s)) => {
-                            let count = s.len();
-                            ptr::copy_nonoverlapping(s.as_ptr(), data.cast::<u8>(), count);
-                            data = data.cast::<u8>().add(count).cast::<u8>();
-                        }
-                        (false, JsStrVariant::Latin1(s)) => {
-                            let count = s.len();
-                            for (i, byte) in s.iter().enumerate() {
-                                *data.cast::<u16>().add(i) = u16::from(*byte);
-                            }
-                            data = data.cast::<u16>().add(count).cast::<u8>();
-                        }
-                        (false, JsStrVariant::Utf16(s)) => {
-                            let count = s.len();
-                            ptr::copy_nonoverlapping(s.as_ptr(), data.cast::<u16>(), count);
-                            data = data.cast::<u16>().add(count).cast::<u8>();
-                        }
-                        (true, JsStrVariant::Utf16(_)) => {
-                            unreachable!("Already checked that it's latin1 encoding")
-                        }
-                    }
-                }
-            }
-
-            Self { ptr: ptr.cast() }
-        };
-
-        StaticJsStrings::get_string(&string.as_str()).unwrap_or(string)
+        Self { ptr: s.cast() }
     }
 
     /// Creates a new [`JsString`] from `data`, without checking if the string is in the interner.
@@ -914,6 +854,13 @@ impl From<JsStr<'_>> for JsString {
     fn from(value: JsStr<'_>) -> Self {
         StaticJsStrings::get_string(&value)
             .unwrap_or_else(|| JsString::from_slice_skip_interning(value))
+    }
+}
+
+impl From<&JsString> for JsString {
+    #[inline]
+    fn from(value: &JsString) -> Self {
+        value.clone()
     }
 }
 

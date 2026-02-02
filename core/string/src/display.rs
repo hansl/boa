@@ -89,21 +89,22 @@ impl fmt::Debug for JsStringDebugInfo<'_> {
             .field("kind", &inner.kind())
             .field("length", &inner.len())
             .field("content", &s_repr);
+        if let Some(rc) = self.inner.refcount() {
+            dbg.borrow_mut().field("refcount", &rc);
+        }
 
         // Show kind specific fields from string.
         match self.inner.kind() {
-            JsStringKind::Latin1Sequence | JsStringKind::Utf16Sequence => {
-                if let Some(rc) = self.inner.refcount() {
-                    dbg.borrow_mut().field("refcount", &rc);
-                }
-            }
             JsStringKind::Slice => {
                 // SAFETY: Just verified the kind.
                 let slice: &SliceString = unsafe { self.inner.as_inner() };
                 dbg.borrow_mut()
                     .field("original", &slice.owned().debug_info());
             }
-            JsStringKind::Static => {}
+            JsStringKind::Latin1Sequence
+            | JsStringKind::Utf16Sequence
+            | JsStringKind::Concat
+            | JsStringKind::Static => {}
         }
 
         dbg.borrow_mut().finish()

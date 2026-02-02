@@ -7,7 +7,6 @@ mod edge;
 mod graph;
 mod node;
 
-use boa_macros::js_str;
 pub use color::*;
 pub use edge::*;
 pub use graph::*;

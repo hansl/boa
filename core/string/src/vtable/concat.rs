@@ -1,12 +1,11 @@
 //! `VTable` implementations for [`ConcatString`].
 
 use crate::iter::CodePointsIter;
-use crate::r#type::{InternalStringType, Latin1, Utf16};
+use crate::r#type::{Latin1, Utf16};
 use crate::vtable::{JsStringVTable, SequenceString};
-use crate::{JsStr, JsStrVariant, JsString, JsStringKind, StaticJsStrings, alloc_overflow};
+use crate::{JsStr, JsStrVariant, JsString, JsStringKind, alloc_overflow};
 use std::alloc::{Layout, alloc, dealloc};
 use std::cell::Cell;
-use std::marker::PhantomData;
 use std::process::abort;
 use std::ptr;
 use std::ptr::NonNull;
@@ -116,9 +115,15 @@ impl ConcatString {
         Ok(inner)
     }
 
-    pub(crate) fn populate(&mut self, array: &[JsString]) -> Self {
-        // SAFETY: We verify all this when constructing the string and populating it.
-        unsafe { std::slice::from_raw_parts(self.strings.as_ptr(), self.count) }
+    pub(crate) fn populate(&mut self, array: &[JsString]) {
+        let mut ptr = self.strings.as_ptr().cast_mut();
+        for s in array {
+            // SAFETY: We verify all this when constructing the string and populating it.
+            unsafe {
+                ptr.write(s.clone());
+                ptr = ptr.add(1);
+            }
+        }
     }
 
     pub(crate) fn strings(&self) -> &'_ [JsString] {
@@ -128,7 +133,7 @@ impl ConcatString {
 
     pub(crate) fn normalize(&self) -> &'_ JsString {
         // SAFETY: This is the only method that uses or builds the normalized field.
-        if let Some(Some(ref s)) = unsafe { self.normalized.as_ptr().as_ref() } {
+        if let Some(Some(s)) = unsafe { self.normalized.as_ptr().as_ref() } {
             return s;
         }
 
@@ -202,7 +207,12 @@ impl ConcatString {
             JsString { ptr: ptr.cast() }
         };
 
-        StaticJsStrings::get_string(&string.as_str()).unwrap_or(string)
+        self.normalized.set(Some(string));
+        // SAFETY: This is the only method that uses or builds the normalized field.
+        if let Some(Some(s)) = unsafe { self.normalized.as_ptr().as_ref() } {
+            return s;
+        }
+        unreachable!("We just constructed the string.")
     }
 }
 
@@ -233,7 +243,7 @@ fn drop(vtable: NonNull<JsStringVTable>) {
     // SAFETY: All the checks for the validity of the layout have already been made on allocation.
     let layout = unsafe {
         Layout::for_value(this)
-            .extend(Layout::array::<T::Byte>(this.vtable.len).unwrap_unchecked())
+            .extend(Layout::array::<JsString>(this.vtable.len).unwrap_unchecked())
             .unwrap_unchecked()
             .0
             .pad_to_align()

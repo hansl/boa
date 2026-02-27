@@ -1031,14 +1031,46 @@ impl JsValue {
     ///
     /// [spec]: https://tc39.es/ecma262/#sec-typeof-operator
     #[must_use]
+    #[inline]
     pub fn type_of(&self) -> &'static str {
-        self.variant().type_of()
+        match self.get_type() {
+            Type::Number => "number",
+            Type::String => "string",
+            Type::Boolean => "boolean",
+            Type::Symbol => "symbol",
+            Type::Null => "object",
+            Type::Undefined => "undefined",
+            Type::BigInt => "bigint",
+            Type::Object => {
+                if self.as_object().expect("value is object").is_callable() {
+                    "function"
+                } else {
+                    "object"
+                }
+            }
+        }
     }
 
     /// Same as [`JsValue::type_of`], but returning a [`JsString`] instead.
     #[must_use]
+    #[inline]
     pub fn js_type_of(&self) -> JsString {
-        self.variant().js_type_of()
+        match self.get_type() {
+            Type::Number => js_string!("number"),
+            Type::String => js_string!("string"),
+            Type::Boolean => js_string!("boolean"),
+            Type::Symbol => js_string!("symbol"),
+            Type::Null => js_string!("object"),
+            Type::Undefined => js_string!("undefined"),
+            Type::BigInt => js_string!("bigint"),
+            Type::Object => {
+                if self.as_object().expect("value is object").is_callable() {
+                    js_string!("function")
+                } else {
+                    js_string!("object")
+                }
+            }
+        }
     }
 
     /// Maps a `JsValue` into `Option<T>` where T is the result of an

@@ -367,10 +367,10 @@ impl JsValue {
     #[inline]
     #[must_use]
     pub fn as_number(&self) -> Option<f64> {
-        match self.variant() {
-            JsVariant::Integer32(i) => Some(f64::from(i)),
-            JsVariant::Float64(f) => Some(f),
-            _ => None,
+        if let Some(i) = self.0.as_integer32() {
+            Some(f64::from(i))
+        } else {
+            self.0.as_float64()
         }
     }
 

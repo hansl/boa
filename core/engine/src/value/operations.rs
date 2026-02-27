@@ -669,23 +669,12 @@ impl JsValue {
     // ==== Numeric Fast Paths ====
     //
     // These methods provide optimized paths for binary operations at the opcode
-    // handler level. They use `self.0.as_integer32()` and `self.as_number_cheap()`
+    // handler level. They use `self.0.as_integer32()` and `self.as_number()`
     // (pure bit operations) instead of `variant()`, which avoids cloning pointer
     // types (Object, String, Symbol, BigInt) for non-numeric values.
     //
     // Returns `Some(result)` if both operands are numeric, `None` otherwise
     // (caller should fall back to the full method with type coercion).
-
-    /// Converts the value to a number if possible, using fast bit operations. This is
-    /// used for the fast operations to allow mixed i32/f64 values.
-    #[inline]
-    fn as_number_cheap(&self) -> Option<f64> {
-        if let Some(i) = self.0.as_integer32() {
-            Some(f64::from(i))
-        } else {
-            self.0.as_float64()
-        }
-    }
 
     /// Fast path for the binary `+` operator (numeric only).
     #[inline]
@@ -697,8 +686,8 @@ impl JsValue {
                     .map_or_else(|| Self::new(f64::from(x) + f64::from(y)), Self::new),
             );
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new(x + y))
     }
 
@@ -711,8 +700,8 @@ impl JsValue {
                     .map_or_else(|| Self::new(f64::from(x) - f64::from(y)), Self::new),
             );
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new(x - y))
     }
 
@@ -726,8 +715,8 @@ impl JsValue {
                     .map_or_else(|| Self::new(f64::from(x) * f64::from(y)), Self::new),
             );
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new(x * y))
     }
 
@@ -742,8 +731,8 @@ impl JsValue {
                     .map_or_else(|| Self::new(f64::from(x) / f64::from(y)), Self::new),
             );
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new(x / y))
     }
 
@@ -759,8 +748,8 @@ impl JsValue {
                 rem => Self::new(rem),
             });
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new((x % y).copysign(x)))
     }
 
@@ -776,8 +765,8 @@ impl JsValue {
                     .map_or_else(|| Self::new(f64::from(x).powi(y)), Self::new),
             );
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         if x.abs() == 1.0 && y.is_infinite() {
             Some(Self::nan())
         } else {
@@ -839,8 +828,8 @@ impl JsValue {
         if let (Some(x), Some(y)) = (self.0.as_integer32(), other.0.as_integer32()) {
             return Some(Self::new(x < y));
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new(x < y))
     }
 
@@ -850,8 +839,8 @@ impl JsValue {
         if let (Some(x), Some(y)) = (self.0.as_integer32(), other.0.as_integer32()) {
             return Some(Self::new(x <= y));
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new(x <= y))
     }
 
@@ -861,8 +850,8 @@ impl JsValue {
         if let (Some(x), Some(y)) = (self.0.as_integer32(), other.0.as_integer32()) {
             return Some(Self::new(x > y));
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new(x > y))
     }
 
@@ -872,8 +861,8 @@ impl JsValue {
         if let (Some(x), Some(y)) = (self.0.as_integer32(), other.0.as_integer32()) {
             return Some(Self::new(x >= y));
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new(x >= y))
     }
 
@@ -884,8 +873,8 @@ impl JsValue {
         if let (Some(x), Some(y)) = (self.0.as_integer32(), other.0.as_integer32()) {
             return Some(Self::new(x == y));
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new(x == y))
     }
 
@@ -896,8 +885,8 @@ impl JsValue {
         if let (Some(x), Some(y)) = (self.0.as_integer32(), other.0.as_integer32()) {
             return Some(Self::new(x != y));
         }
-        let x = self.as_number_cheap()?;
-        let y = other.as_number_cheap()?;
+        let x = self.as_number()?;
+        let y = other.as_number()?;
         Some(Self::new(x != y))
     }
 }

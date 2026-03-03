@@ -461,7 +461,8 @@ impl Context {
         let frame = self.vm.frame_mut();
         let pc = frame.pc as usize;
 
-        OPCODE_HANDLERS[opcode as usize](self, pc)
+        // Safety: opcode is u8 and guaranteed to be within the bounds of the array.
+        unsafe { OPCODE_HANDLERS.get_unchecked(opcode as usize)(self, pc) }
     }
 
     pub(crate) fn execute_bytecode_instruction_with_budget(
@@ -472,7 +473,8 @@ impl Context {
         let frame = self.vm.frame_mut();
         let pc = frame.pc as usize;
 
-        OPCODE_HANDLERS_BUDGET[opcode as usize](self, pc, budget)
+        // Safety: opcode is u8 and guaranteed to be within the bounds of the array.
+        unsafe { OPCODE_HANDLERS_BUDGET.get_unchecked(opcode as usize)(self, pc, budget) }
     }
 }
 

@@ -1804,9 +1804,7 @@ impl SourceTextModule {
                         let frame = context.vm.frame();
                         frame
                             .environments
-                            .current_declarative_ref(frame.realm.environment())
-                            .expect("must be declarative")
-                            .kind()
+                            .current_declarative_kind(frame.realm.environment())
                             .as_module()
                             .expect("last environment should be the module env")
                             .set_indirect(

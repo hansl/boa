@@ -14,22 +14,22 @@ pub(crate) struct CreateMappedArgumentsObject;
 impl CreateMappedArgumentsObject {
     #[inline(always)]
     pub(super) fn operation(value: RegisterOperand, context: &mut Context) {
-        let frame = context.vm.frame();
+        // Get the declarative env first (needs frame_mut for potential promotion).
+        let env = {
+            let frame = context.vm.frame_mut();
+            let global = frame.realm.environment();
+            frame
+                .environments
+                .current_declarative_gc(global)
+                .expect("must be declarative")
+        };
         let function_object = context
             .vm
             .stack
             .get_function(context.vm.frame())
             .expect("there should be a function object");
-        let code = frame.code_block().clone();
+        let code = context.vm.frame().code_block().clone();
         let args = context.vm.stack.get_arguments(context.vm.frame());
-        let env = {
-            let frame = context.vm.frame();
-            frame
-                .environments
-                .current_declarative_ref(frame.realm.environment())
-                .expect("must be declarative")
-                .clone()
-        };
         let arguments = MappedArguments::new(
             &function_object,
             &code.mapped_arguments_binding_indices,

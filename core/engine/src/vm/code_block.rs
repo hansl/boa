@@ -1094,9 +1094,10 @@ pub(crate) fn create_function_object(
 
     let is_async = code.is_async();
     let is_generator = code.is_generator();
+    let environments = context.vm.frame_mut().environments.snapshot_for_closure();
     let function = OrdinaryFunction::new(
         code,
-        context.vm.frame().environments.snapshot_for_closure(),
+        environments,
         script_or_module,
         context.realm().clone(),
     );
@@ -1163,9 +1164,10 @@ pub(crate) fn create_function_object_fast(code: Gc<CodeBlock>, context: &mut Con
     let is_async = code.is_async();
     let is_generator = code.is_generator();
     let has_prototype_property = code.has_prototype_property();
+    let environments = context.vm.frame_mut().environments.snapshot_for_closure();
     let function = OrdinaryFunction::new(
         code,
-        context.vm.frame().environments.snapshot_for_closure(),
+        environments,
         script_or_module,
         context.realm().clone(),
     );

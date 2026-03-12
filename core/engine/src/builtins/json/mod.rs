@@ -302,6 +302,7 @@ impl Json {
         let realm = context.realm().clone();
 
         let env_fp = context.vm.frame().environments.len() as u32;
+        context.vm.frame_mut().environments.promote_all();
         context.vm.push_frame_with_stack(
             CallFrame::new(
                 code_block,

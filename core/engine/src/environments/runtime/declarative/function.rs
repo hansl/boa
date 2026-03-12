@@ -6,7 +6,7 @@ use crate::{JsNativeError, JsObject, JsResult, JsValue, builtins::function::Ordi
 #[derive(Debug, Trace, Finalize)]
 pub(crate) struct FunctionEnvironment {
     bindings: GcRefCell<Vec<Option<JsValue>>>,
-    slots: Box<FunctionSlots>,
+    slots: FunctionSlots,
 
     // Safety: Nothing in `Scope` needs tracing.
     #[unsafe_ignore_trace]
@@ -18,7 +18,7 @@ impl FunctionEnvironment {
     pub(crate) fn new(bindings_count: u32, slots: FunctionSlots, scope: Scope) -> Self {
         Self {
             bindings: GcRefCell::new(vec![None; bindings_count as usize]),
-            slots: Box::new(slots),
+            slots,
             scope,
         }
     }

@@ -27,10 +27,9 @@
 mod runtime;
 
 pub(crate) use runtime::{
-    DeclarativeEnvironment, EnvironmentStack, FunctionSlots, PrivateEnvironment,
-    SavedEnvironments, ThisBindingStatus,
+    DeclarativeEnvironment, EnvironmentStack, FunctionSlots, PrivateEnvironment, SavedEnvironments,
+    ThisBindingStatus,
 };
-
 
 #[cfg(test)]
 mod tests;

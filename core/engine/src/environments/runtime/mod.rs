@@ -126,7 +126,11 @@ impl Clone for LocalEnvironment {
 impl std::fmt::Debug for LocalEnvironment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Inline { kind, poisoned, with } => f
+            Self::Inline {
+                kind,
+                poisoned,
+                with,
+            } => f
                 .debug_struct("Inline")
                 .field("kind", kind)
                 .field("poisoned", poisoned)
@@ -479,17 +483,17 @@ impl EnvironmentStack {
     /// Check if the declarative environment at the given index is a function env.
     #[allow(dead_code)]
     pub(crate) fn env_is_function(&self, env_index: u32) -> bool {
-        matches!(self.env_kind(env_index), DeclarativeEnvironmentKind::Function(_))
+        matches!(
+            self.env_kind(env_index),
+            DeclarativeEnvironmentKind::Function(_)
+        )
     }
 
     // ---- Tip (current environment) access ----
 
     /// Returns `true` if the tip environment is a non-poisoned, non-with declarative env.
     /// Used as the fast-path early exit in `find_runtime_binding`.
-    pub(crate) fn current_is_clean_declarative(
-        &self,
-        global: &Gc<DeclarativeEnvironment>,
-    ) -> bool {
+    pub(crate) fn current_is_clean_declarative(&self, global: &Gc<DeclarativeEnvironment>) -> bool {
         if let Some(local) = self.local.last() {
             match local {
                 LocalEnvironment::Inline { poisoned, with, .. } => !poisoned.get() && !*with,
@@ -509,10 +513,7 @@ impl EnvironmentStack {
 
     /// Returns `true` if the tip is a declarative env that is not a `with` wrapper.
     /// Used as the fast-path early exit in `this_from_object_environment_binding`.
-    pub(crate) fn current_is_not_with(
-        &self,
-        global: &Gc<DeclarativeEnvironment>,
-    ) -> bool {
+    pub(crate) fn current_is_not_with(&self, global: &Gc<DeclarativeEnvironment>) -> bool {
         if let Some(local) = self.local.last() {
             match local {
                 LocalEnvironment::Inline { with, .. } => !*with,
@@ -623,9 +624,10 @@ impl EnvironmentStack {
         let mut current = self.captured_tip.as_deref();
         while let Some(node) = current {
             if let Environment::Declarative(gc) = &node.env
-                && gc.has_this_binding() {
-                    return gc.kind();
-                }
+                && gc.has_this_binding()
+            {
+                return gc.kind();
+            }
             current = node.parent.as_deref();
         }
         // Fall back to global.
@@ -662,9 +664,10 @@ impl EnvironmentStack {
         let mut current = self.captured_tip.as_deref();
         while let Some(node) = current {
             if let Environment::Declarative(gc) = &node.env
-                && let Some(this) = gc.get_this_binding()? {
-                    return Ok(Some(this));
-                }
+                && let Some(this) = gc.get_this_binding()?
+            {
+                return Ok(Some(this));
+            }
             current = node.parent.as_deref();
         }
         Ok(None)
@@ -674,9 +677,7 @@ impl EnvironmentStack {
 
     /// Gets the next outer function environment.
     #[allow(dead_code)]
-    pub(crate) fn outer_function_environment(
-        &self,
-    ) -> Option<(Gc<DeclarativeEnvironment>, Scope)> {
+    pub(crate) fn outer_function_environment(&self) -> Option<(Gc<DeclarativeEnvironment>, Scope)> {
         // Search local environments.
         for local in self.local.iter().rev() {
             let kind = match local {
@@ -711,9 +712,10 @@ impl EnvironmentStack {
         let mut current = self.captured_tip.as_deref();
         while let Some(node) = current {
             if let Environment::Declarative(gc) = &node.env
-                && let Some(func_env) = gc.kind().as_function() {
-                    return Some((gc.clone(), func_env.compile().clone()));
-                }
+                && let Some(func_env) = gc.kind().as_function()
+            {
+                return Some((gc.clone(), func_env.compile().clone()));
+            }
             current = node.parent.as_deref();
         }
         None
@@ -753,9 +755,10 @@ impl EnvironmentStack {
         let mut current = self.captured_tip.as_deref();
         while let Some(node) = current {
             if let Environment::Declarative(gc) = &node.env
-                && let Some(func_env) = gc.kind().as_function() {
-                    return Some((gc.clone(), func_env.compile().clone()));
-                }
+                && let Some(func_env) = gc.kind().as_function()
+            {
+                return Some((gc.clone(), func_env.compile().clone()));
+            }
             current = node.parent.as_deref();
         }
         None
@@ -967,9 +970,7 @@ impl EnvironmentStack {
         // `poisoned` inherits from the nearest declarative environment.
         if let Some(local) = self.local.last() {
             match local {
-                LocalEnvironment::Inline {
-                    poisoned, with, ..
-                } => (poisoned.get(), *with),
+                LocalEnvironment::Inline { poisoned, with, .. } => (poisoned.get(), *with),
                 LocalEnvironment::Promoted(gc) => (gc.poisoned(), gc.with()),
                 LocalEnvironment::Object(_) => {
                     // Object env at tip → new env is `with: true`.
@@ -1045,7 +1046,12 @@ impl Context {
     /// environment or `eval` call modified the compile-time bindings.
     pub(crate) fn find_runtime_binding(&mut self, locator: &mut BindingLocator) -> JsResult<()> {
         let global = self.vm.frame().realm.environment();
-        if self.vm.frame().environments.current_is_clean_declarative(global) {
+        if self
+            .vm
+            .frame()
+            .environments
+            .current_is_clean_declarative(global)
+        {
             return Ok(());
         }
 
@@ -1077,7 +1083,8 @@ impl Context {
             } else {
                 let poisoned = self.vm.frame().environments.env_poisoned(index);
                 if poisoned {
-                    if let Some(func_env) = self.vm.frame().environments.env_kind(index).as_function()
+                    if let Some(func_env) =
+                        self.vm.frame().environments.env_kind(index).as_function()
                         && let Some(b) = func_env.compile().get_binding(locator.name())
                     {
                         locator.set_scope(b.scope());
@@ -1139,7 +1146,8 @@ impl Context {
             } else {
                 let poisoned = self.vm.frame().environments.env_poisoned(index);
                 if poisoned {
-                    if let Some(func_env) = self.vm.frame().environments.env_kind(index).as_function()
+                    if let Some(func_env) =
+                        self.vm.frame().environments.env_kind(index).as_function()
                         && func_env.compile().get_binding(locator.name()).is_some()
                     {
                         break;
@@ -1265,10 +1273,11 @@ impl Context {
                     let key = locator.name().clone();
                     obj.set(key, value, strict, self)?;
                 } else {
-                    self.vm
-                        .frame()
-                        .environments
-                        .set_binding_value(index, locator.binding_index(), value);
+                    self.vm.frame().environments.set_binding_value(
+                        index,
+                        locator.binding_index(),
+                        value,
+                    );
                 }
             }
         }
